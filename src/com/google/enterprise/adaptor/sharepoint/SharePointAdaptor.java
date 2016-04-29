@@ -285,6 +285,8 @@ public class SharePointAdaptor extends AbstractAdaptor
   private boolean performBrowserLeniency;
   
   private boolean performSidLookup;
+  
+  private boolean useFlatAcls = false;
 
   /**
    * Mapping of mime-types used by SharePoint to ones that the GSA comprehends.
@@ -519,6 +521,8 @@ public class SharePointAdaptor extends AbstractAdaptor
     // Set this to static factory method name which will return 
     // custom SamlHandshakeManager object
     config.addKey("sharepoint.customSamlManager", "");
+    // Set this to true to use flatten ACLs
+    config.addKey("adaptor.useFlatAcls", "false");
   }
 
   @Override
@@ -552,6 +556,7 @@ public class SharePointAdaptor extends AbstractAdaptor
         "adaptor.maxRedirectsToFollow");
     performBrowserLeniency = Boolean.parseBoolean(config.getValue(
         "adaptor.lenientUrlRulesAndCustomRedirect"));
+    useFlatAcls = Boolean.parseBoolean(config.getValue("adaptor.useFlatAcls"));
     if (performBrowserLeniency && "".equals(maxRedirectsToFollowStr)) {
       maxRedirectsToFollow = DEFAULT_MAX_REDIRECTS_TO_FOLLOW;
     } else if (performBrowserLeniency) {
@@ -2161,7 +2166,7 @@ public class SharePointAdaptor extends AbstractAdaptor
         Acl.Builder acl = new Acl.Builder().setEverythingCaseInsensitive()
             .setPermits(admins)
             .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES);
-        if (!sharePointUrl.isSiteCollectionUrl()) {
+        if (!sharePointUrl.isSiteCollectionUrl() && !useFlatAcls) {
           acl.setInheritFrom(virtualServerDocId);
         } else {
           log.log(Level.INFO, "Not inheriting from Web application policy "
@@ -2195,7 +2200,7 @@ public class SharePointAdaptor extends AbstractAdaptor
 
       if (!allowAnonymousAccess) {
         final boolean includePermissions;
-        if (isWebSiteCollection()) {
+        if (isWebSiteCollection() || useFlatAcls) {
           includePermissions = true;
         } else {
           SiteAdaptor parentSiteAdaptor
@@ -2211,8 +2216,10 @@ public class SharePointAdaptor extends AbstractAdaptor
         if (includePermissions) {
           List<Permission> permissions
               = w.getACL().getPermissions().getPermission();
-          acl = generateAcl(permissions, LIST_ITEM_MASK)
-              .setInheritFrom(siteDocId, SITE_COLLECTION_ADMIN_FRAGMENT);
+          acl = generateAcl(permissions, LIST_ITEM_MASK);
+          if (!useFlatAcls) {
+            acl.setInheritFrom(siteDocId, SITE_COLLECTION_ADMIN_FRAGMENT);
+          }
         } else {
           acl = new Acl.Builder().setInheritFrom(new DocId(getWebParentUrl()));
         }
@@ -2308,29 +2315,34 @@ public class SharePointAdaptor extends AbstractAdaptor
           && (!isDenyAnonymousAccessOnVirtualServer());
 
       if (!allowAnonymousAccess) {
-        String scopeId
-            = l.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
-        String webScopeId
-            = w.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
+        String scopeId =
+            l.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
+        String webScopeId =
+            w.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
 
-        DocId rootFolderDocId
-            = encodeDocId(l.getMetadata().getRootFolder());
-
+        DocId rootFolderDocId = encodeDocId(l.getMetadata().getRootFolder());
         Acl.Builder acl;
-        if (scopeId.equals(webScopeId)) {
-          acl = new Acl.Builder().setInheritFrom(new DocId(webUrl));
+        if (useFlatAcls) {
+          List<Permission> permissions =
+              l.getACL().getPermissions().getPermission();
+          acl = generateAcl(permissions, LIST_ITEM_MASK);
+          response.setAcl(acl.build());
         } else {
-          List<Permission> permissions
-              = l.getACL().getPermissions().getPermission();
-          acl = generateAcl(permissions, LIST_ITEM_MASK)
-              .setInheritFrom(siteDocId, SITE_COLLECTION_ADMIN_FRAGMENT);
+          if (scopeId.equals(webScopeId)) {
+            acl = new Acl.Builder().setInheritFrom(new DocId(webUrl));
+          } else {
+            List<Permission> permissions =
+                l.getACL().getPermissions().getPermission();
+            acl = generateAcl(permissions, LIST_ITEM_MASK)
+                .setInheritFrom(siteDocId, SITE_COLLECTION_ADMIN_FRAGMENT);
+          }
+          response.setAcl(new Acl.Builder().setInheritFrom(rootFolderDocId)
+              .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
+              .build());
+          context.getAsyncDocIdPusher().pushNamedResource(rootFolderDocId,
+              acl.setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
+              .build());
         }
-        response.setAcl(new Acl.Builder().setInheritFrom(rootFolderDocId)
-            .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
-            .build());
-        context.getAsyncDocIdPusher().pushNamedResource(rootFolderDocId,
-                acl.setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
-                    .build());
       }
 
       response.addMetadata(METADATA_OBJECT_TYPE,
@@ -2647,9 +2659,17 @@ public class SharePointAdaptor extends AbstractAdaptor
           // Check if anonymous access is denied by web application policy
           && (!isDenyAnonymousAccessOnVirtualServer());
       if (!allowAnonymousAccess) {
-        response.setAcl(new Acl.Builder()
-            .setInheritFrom(new DocId(parentId))
-            .build());
+        if (useFlatAcls) {
+          Web parentW = siteDataClient.getContentWeb();
+          List<Permission> permissions =
+              parentW.getACL().getPermissions().getPermission();
+          Acl.Builder acl = generateAcl(permissions, LIST_ITEM_MASK);
+          response.setAcl(acl.build());
+        } else {
+          response.setAcl(new Acl.Builder()
+              .setInheritFrom(new DocId(parentId))
+              .build());
+        }
       }
       response.addMetadata(METADATA_OBJECT_TYPE, "Aspx");      
       response.addMetadata(METADATA_PARENT_WEB_TITLE, w.webTitle);
@@ -3151,10 +3171,25 @@ public class SharePointAdaptor extends AbstractAdaptor
           && isAllowAnonymousPeekForWeb(w)
           && (!isDenyAnonymousAccessOnVirtualServer());
       if (!allowAnonymousAccess) {
-        String listItemUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
-        response.setAcl(new Acl.Builder()
-            .setInheritFrom(encodeDocId(listItemUrl))
-            .build());
+        if (useFlatAcls) {
+          Scopes scopes = getFirstChildOfType(xml, Scopes.class);
+          Acl.Builder acl = null;
+          for (Scopes.Scope scope : scopes.getScope()) {
+            if (scope.getId().toLowerCase(Locale.ENGLISH).equals(scopeId)) {
+              acl = generateAcl(scope.getPermission(), LIST_ITEM_MASK);
+              break;
+            }
+          }
+          if (acl == null) {
+            throw new IOException("scope on list item is not available");
+          }
+          response.setAcl(acl.build());
+        } else {
+          String listItemUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
+          response.setAcl(new Acl.Builder()
+              .setInheritFrom(encodeDocId(listItemUrl))
+              .build());
+        }
       }
       response.addMetadata(METADATA_OBJECT_TYPE, "Attachment");
       response.addMetadata(METADATA_PARENT_WEB_TITLE, w.webTitle);
