@@ -521,8 +521,6 @@ public class SharePointAdaptor extends AbstractAdaptor
     // Set this to static factory method name which will return 
     // custom SamlHandshakeManager object
     config.addKey("sharepoint.customSamlManager", "");
-    // Set this to true to use flatten ACLs
-    config.addKey("adaptor.useFlatAcls", "false");
   }
 
   @Override
