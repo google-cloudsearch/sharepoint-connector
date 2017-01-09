@@ -14,9 +14,9 @@
 
 package com.google.enterprise.adaptor.sharepoint;
 
-import static com.google.enterprise.adaptor.sharepoint.SharePointAdaptor.FileInfo;
-import static com.google.enterprise.adaptor.sharepoint.SharePointAdaptor.HttpClient;
-import static com.google.enterprise.adaptor.sharepoint.SharePointAdaptor.SoapFactory;
+import static com.google.enterprise.adaptor.sharepoint.SharePointConnector.FileInfo;
+import static com.google.enterprise.adaptor.sharepoint.SharePointConnector.HttpClient;
+import static com.google.enterprise.adaptor.sharepoint.SharePointConnector.SoapFactory;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -39,10 +39,10 @@ import com.google.enterprise.adaptor.Principal;
 import com.google.enterprise.adaptor.UserPrincipal;
 import com.google.enterprise.adaptor.sharepoint.ActiveDirectoryClient.ADServer;
 import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
-import com.google.enterprise.adaptor.sharepoint.SharePointAdaptor.FileInfo;
-import com.google.enterprise.adaptor.sharepoint.SharePointAdaptor.SharePointUrl;
-import com.google.enterprise.adaptor.sharepoint.SharePointAdaptor.SiteUserIdMappingCallable;
-import com.google.enterprise.adaptor.sharepoint.SharePointAdaptor.SoapFactory;
+import com.google.enterprise.adaptor.sharepoint.SharePointConnector.FileInfo;
+import com.google.enterprise.adaptor.sharepoint.SharePointConnector.SharePointUrl;
+import com.google.enterprise.adaptor.sharepoint.SharePointConnector.SiteUserIdMappingCallable;
+import com.google.enterprise.adaptor.sharepoint.SharePointConnector.SoapFactory;
 
 import com.microsoft.schemas.sharepoint.soap.ItemData;
 import com.microsoft.schemas.sharepoint.soap.ObjectType;
@@ -135,9 +135,9 @@ import javax.xml.ws.WebServiceException;
 import javax.xml.ws.handler.MessageContext;
 
 /**
- * Test cases for {@link SharePointAdaptor}.
+ * Test cases for {@link SharePointConnector}.
  */
-public class SharePointAdaptorTest {
+public class SharePointConnectorTest {
   private static final String AUTH_ENDPOINT
       = "http://localhost:1/_vti_bin/Authentication.asmx";
   private static final String VS_ENDPOINT
@@ -247,7 +247,7 @@ public class SharePointAdaptorTest {
 
   private final Charset charset = Charset.forName("UTF-8");
   private Config config;
-  private SharePointAdaptor adaptor;
+  private SharePointConnector adaptor;
   private DocIdPusher pusher = new UnsupportedDocIdPusher();
   private Callable<ExecutorService> executorFactory
       = new Callable<ExecutorService>() {
@@ -273,13 +273,13 @@ public class SharePointAdaptorTest {
    */
   @BeforeClass
   public static void initJaxbContext() {
-    SharePointAdaptor.init();
+    SharePointConnector.init();
   }
 
   @Before
   public void setup() {
     config = new Config();
-    new SharePointAdaptor().initConfig(config);
+    new SharePointConnector().initConfig(config);
     config.overrideKey("sharepoint.server", "http://localhost:1");
     config.overrideKey("sharepoint.username", "fakeuser");
     config.overrideKey("sharepoint.password", "fakepass");
@@ -309,27 +309,27 @@ public class SharePointAdaptorTest {
 
   @Test
   public void testSiteDataFactoryImpl() throws IOException {
-    SharePointAdaptor.SoapFactoryImpl sdfi
-        = new SharePointAdaptor.SoapFactoryImpl();
+    SharePointConnector.SoapFactoryImpl sdfi
+        = new SharePointConnector.SoapFactoryImpl();
     assertNotNull(
         sdfi.newSiteData("http://localhost:1/_vti_bin/SiteData.asmx"));
   }
 
   @Test
   public void testConstructor() {
-    new SharePointAdaptor();
+    new SharePointConnector();
   }
 
   @Test
   public void testDestroy() {
-    SharePointAdaptor adaptor = new SharePointAdaptor();
+    SharePointConnector adaptor = new SharePointConnector();
     adaptor.destroy();
   }
 
   @Test
   public void testNullSoapFactory() {
     thrown.expect(NullPointerException.class);
-    new SharePointAdaptor(null, new UnsupportedHttpClient(), executorFactory,
+    new SharePointConnector(null, new UnsupportedHttpClient(), executorFactory,
         new UnsupportedAuthenticationClientFactory(),
         new UnsupportedActiveDirectoryClientFactory());
   }
@@ -337,7 +337,7 @@ public class SharePointAdaptorTest {
   @Test
   public void testNullHttpClient() {
     thrown.expect(NullPointerException.class);
-    new SharePointAdaptor(MockSoapFactory.blank(), null, executorFactory,
+    new SharePointConnector(MockSoapFactory.blank(), null, executorFactory,
         new UnsupportedAuthenticationClientFactory(),
         new UnsupportedActiveDirectoryClientFactory());
   }
@@ -345,14 +345,14 @@ public class SharePointAdaptorTest {
   @Test
   public void testNullExecutorFactory() {
     thrown.expect(NullPointerException.class);
-    new SharePointAdaptor(MockSoapFactory.blank(), new UnsupportedHttpClient(),
+    new SharePointConnector(MockSoapFactory.blank(), new UnsupportedHttpClient(),
         null, new UnsupportedAuthenticationClientFactory(),
         new UnsupportedActiveDirectoryClientFactory());
   }
 
   @Test
   public void testInitDestroy() throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -391,7 +391,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/People.asmx", peopleSoap)
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx", userGroupSoap);
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms() {
           @Override
@@ -423,7 +423,7 @@ public class SharePointAdaptorTest {
       tmp.put("com.sun.xml.ws.connect.timeout", 30000);
       tmp.put("com.sun.xml.ws.request.timeout", 180000);
       tmp.put(MessageContext.HTTP_REQUEST_HEADERS, Collections.singletonMap(
-          "User-Agent", Collections.singletonList("GSASharePointAdaptor")));
+          "User-Agent", Collections.singletonList("GSASharePointConnector")));
       goldenRequestContextAuth 
           = Collections.unmodifiableMap(new HashMap<String, Object>(tmp));
       // Disabling forms authentication and add user agent
@@ -431,7 +431,7 @@ public class SharePointAdaptorTest {
       headers.put("X-FORMS_BASED_AUTH_ACCEPTED",
           Collections.singletonList("f"));
       headers.put("User-Agent",
-          Collections.singletonList("GSASharePointAdaptor"));
+          Collections.singletonList("GSASharePointConnector"));
       tmp.put(MessageContext.HTTP_REQUEST_HEADERS,
           Collections.unmodifiableMap(headers));
       goldenRequestContext = Collections.unmodifiableMap(tmp);
@@ -448,7 +448,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/People.asmx", peopleSoap)
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx", userGroupSoap);
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms() {
           @Override
@@ -458,7 +458,7 @@ public class SharePointAdaptorTest {
             return authenticationSoap;
           }
         }, new UnsupportedActiveDirectoryClientFactory());    
-    config.overrideKey("adaptor.userAgent", "GSASharePointAdaptor");
+    config.overrideKey("adaptor.userAgent", "GSASharePointConnector");
     adaptor.init(new MockAdaptorContext(config, pusher));
     assertEquals(goldenRequestContext, siteDataSoap.getRequestContext());
     assertEquals(goldenRequestContext, peopleSoap.getRequestContext());
@@ -480,7 +480,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx",
             new MockUserGroupSoap(null));
     
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryAdfs(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -498,17 +498,17 @@ public class SharePointAdaptorTest {
     VirtualServer vs = new SiteDataClient(siteDataSoap, true)
         .getContentVirtualServer();
 
-    assertEquals(1, SharePointAdaptor.checkFullReadPermissionForAdaptorUser(vs,
+    assertEquals(1, SharePointConnector.checkFullReadPermissionForAdaptorUser(vs,
         "GDC-PSL\\spuser1"));
-    assertEquals(0, SharePointAdaptor.checkFullReadPermissionForAdaptorUser(vs,
+    assertEquals(0, SharePointConnector.checkFullReadPermissionForAdaptorUser(vs,
         "GDC-PSL\\administrator"));
-    assertEquals(-1, SharePointAdaptor.checkFullReadPermissionForAdaptorUser(vs,
+    assertEquals(-1, SharePointConnector.checkFullReadPermissionForAdaptorUser(vs,
         "Some Fake User"));
   }
   
   @Test
   public void testAdaptorInitwithMalformedSharePointUrl() throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -535,7 +535,7 @@ public class SharePointAdaptorTest {
             throw new UnknownHostException("stsendpoint");
           }
     };
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryAdfs() {
           @Override
@@ -555,7 +555,7 @@ public class SharePointAdaptorTest {
   
   @Test
   public void testAdaptorInitAdfsWithBlankUsername() throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -570,7 +570,7 @@ public class SharePointAdaptorTest {
   
   @Test
   public void testAdaptorInitLiveWithBlankUsername() throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -593,7 +593,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx",
             new MockUserGroupSoap(null));
     
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -614,7 +614,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx",
             new MockUserGroupSoap(null));
     
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryLive(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -635,7 +635,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx",
             new MockUserGroupSoap(null));
     
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new AuthenticationClientFactoryImpl(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -660,7 +660,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx",
             new MockUserGroupSoap(null));
     
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new AuthenticationClientFactoryImpl(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -688,7 +688,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx",
             new MockUserGroupSoap(null));
     
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new AuthenticationClientFactoryImpl(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -715,7 +715,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/_vti_bin/UserGroup.asmx",
             new MockUserGroupSoap(null));
     
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new AuthenticationClientFactoryImpl(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -732,7 +732,7 @@ public class SharePointAdaptorTest {
 
   @Test
   public void testInitDestroyInitDestroy() throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());    
@@ -745,7 +745,7 @@ public class SharePointAdaptorTest {
 
   @Test
   public void testTrailingSlashInit() throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -756,29 +756,29 @@ public class SharePointAdaptorTest {
   @Test
   public void testSpUrlToUriPassthrough() throws Exception {
     assertEquals("http://somehost:1/path/file",
-        SharePointAdaptor.spUrlToUri("http://somehost:1/path/file").toString());
+        SharePointConnector.spUrlToUri("http://somehost:1/path/file").toString());
   }
 
   @Test
   public void testSpUrlToUriSpace() throws Exception {
     assertEquals("http://somehost/A%20space",
-        SharePointAdaptor.spUrlToUri("http://somehost/A space").toString());
+        SharePointConnector.spUrlToUri("http://somehost/A space").toString());
   }
 
   @Test
   public void testSpUrlToUriPassthroughNoPath() throws Exception {
     assertEquals("https://somehost",
-        SharePointAdaptor.spUrlToUri("https://somehost").toString());
+        SharePointConnector.spUrlToUri("https://somehost").toString());
   }
 
   @Test(expected = IllegalArgumentException.class)
   public void testSpUrlToUriNoSceme() throws Exception {
-    SharePointAdaptor.spUrlToUri("http:/");
+    SharePointConnector.spUrlToUri("http:/");
   }
   
   @Test
   public void testAdaptorInitWithInvalidMaxRedirects() throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -790,7 +790,7 @@ public class SharePointAdaptorTest {
   
   @Test
   public void testAdaptorInitWithNegativeMaxRedirects() throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -803,7 +803,7 @@ public class SharePointAdaptorTest {
   @Test
   public void testAdaptorInitWithValidMaxRedirectsNoBrowserLeniency()
       throws Exception {
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -817,30 +817,30 @@ public class SharePointAdaptorTest {
   @Test
   public void testMetadataDecoding() {
     assertEquals("NothingSpecial",
-        SharePointAdaptor.decodeMetadataName("NothingSpecial"));
+        SharePointConnector.decodeMetadataName("NothingSpecial"));
     assertEquals("_x020__x00020__0020__x0020",
-        SharePointAdaptor.decodeMetadataName("_x020__x00020__0020__x0020"));
+        SharePointConnector.decodeMetadataName("_x020__x00020__0020__x0020"));
     assertEquals("Simple Space",
-        SharePointAdaptor.decodeMetadataName("Simple_x0020_Space"));
+        SharePointConnector.decodeMetadataName("Simple_x0020_Space"));
     assertEquals("Multiple \u0394Replacements\u2ee8$",
-        SharePointAdaptor.decodeMetadataName(
+        SharePointConnector.decodeMetadataName(
             "Multiple_x0020__x0394_Replacements_x2ee8__x0024_"));
   }
 
   @Test
   public void testStripHtml() {
     assertEquals("<testing@example.com>",
-        SharePointAdaptor.stripHtml("<testing@example.com>"));
+        SharePointConnector.stripHtml("<testing@example.com>"));
     assertEquals("some text",
-        SharePointAdaptor.stripHtml("<div><b>some</b> text</div>"));
+        SharePointConnector.stripHtml("<div><b>some</b> text</div>"));
     assertEquals("a 0 ",
-        SharePointAdaptor.stripHtml("<br><a href=\"test's\" hover=none "
+        SharePointConnector.stripHtml("<br><a href=\"test's\" hover=none "
           + "\nz='fo\" '>a &#0048;</a> "));
     // The space isn't a space, but a no-break space.
     // The \u0000 is is simply to make sure we don't break. It is actually
     // invalid input, so we don't care too much how we resolve it.
     assertEquals(" &&<>\"'0\u2014\u0000$",
-        SharePointAdaptor.stripHtml(
+        SharePointConnector.stripHtml(
             "&nbsp;&&amp;&lt;&gt;&quot;&apos;&#0048;&#8212;&abcde;"
             + "&#9999999999;&#65536;&#0036;"));
   }
@@ -854,7 +854,7 @@ public class SharePointAdaptorTest {
             .register(new SiteAndWebExchange(
                 "http://wronghost:1/", 1, null, null)));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -879,7 +879,7 @@ public class SharePointAdaptorTest {
             .register(new URLSegmentsExchange(
                 wrongPage, false, null, null, null, null)));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -919,7 +919,7 @@ public class SharePointAdaptorTest {
                         + "634762601982930000;726",
                     600, getChangesSiteCollection726, false)));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -955,7 +955,7 @@ public class SharePointAdaptorTest {
             .register(CD_CONTENT_EXCHANGE))
         .endpoint("http://localhost:1/_vti_bin/People.asmx", mockPeople);
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1002,7 +1002,7 @@ public class SharePointAdaptorTest {
                     "http://localhost:1/sites/SiteCollection/")))
         .endpoint("http://localhost:1/_vti_bin/People.asmx", mockPeople);
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1052,7 +1052,7 @@ public class SharePointAdaptorTest {
                 new WebServiceException("Content database not available"))))
         .endpoint("http://localhost:1/_vti_bin/People.asmx", mockPeople);
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,        
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1150,7 +1150,7 @@ public class SharePointAdaptorTest {
             .register(CD_CONTENT_EXCHANGE))
         .endpoint("http://localhost:1/_vti_bin/People.asmx", mockPeople);
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory, 
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1205,7 +1205,7 @@ public class SharePointAdaptorTest {
             .register(SITES_SITECOLLECTION_S_CONTENT_EXCHANGE)
             .register(SITES_SITECOLLECTION_SC_CONTENT_EXCHANGE));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1286,7 +1286,7 @@ public class SharePointAdaptorTest {
             .register(SITES_SITECOLLECTION_URLSEG_EXCHANGE)
             .register(SITES_SITECOLLECTION_S_CONTENT_EXCHANGE)
             .register(SITES_SITECOLLECTION_SC_CONTENT_EXCHANGE));
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1379,7 +1379,7 @@ public class SharePointAdaptorTest {
                         + "634762601982930000;726",
                     600, getChangesSiteCollection726, false)));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1485,7 +1485,7 @@ public class SharePointAdaptorTest {
         .endpoint("http://localhost:1/sites/SiteCollection/"
             + "_vti_bin/UserGroup.asmx", mockUserGroupSoap);
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1544,7 +1544,7 @@ public class SharePointAdaptorTest {
               .replaceInContent("IsDomainGroup=\"False\"",
                 "IsDomainGroup=\"True\"")));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1602,7 +1602,7 @@ public class SharePointAdaptorTest {
               .replaceInContent("</permissions>", permissions)));
 
     
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1677,7 +1677,7 @@ public class SharePointAdaptorTest {
     MockActiveDirectoryClientFactory adClientFactory =
         new MockActiveDirectoryClientFactory(
             new MockADServer(Collections.unmodifiableMap(sidLookup)));
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         adClientFactory);
@@ -1753,7 +1753,7 @@ public class SharePointAdaptorTest {
               .replaceInContent("<User ID=\"6\"", "<User ID=\"100\"")
               .replaceInContent("spuser2", "spuser100"));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1804,7 +1804,7 @@ public class SharePointAdaptorTest {
             .register(SITES_SITECOLLECTION_S_CONTENT_EXCHANGE
               .replaceInContent("NoIndex=\"False\"", "NoIndex=\"True\"")));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1825,7 +1825,7 @@ public class SharePointAdaptorTest {
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_F_CONTENT_EXCHANGE)
         .register(SITES_SITECOLLECTION_S_CONTENT_EXCHANGE);
 
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1885,7 +1885,7 @@ public class SharePointAdaptorTest {
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_L_CONTENT_EXCHANGE
           .replaceInContent("NoIndex=\"False\"", "NoIndex=\"True\""));
 
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1912,7 +1912,7 @@ public class SharePointAdaptorTest {
           "http://localhost:1/sites/SiteCollection/Lists/Custom List"
           + "/NonDefault.aspx", false, null, null, null, null))
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_L_CONTENT_EXCHANGE);
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1944,7 +1944,7 @@ public class SharePointAdaptorTest {
               "http://localhost:1/sites/SiteCollection/Lists/Custom List",
                true, null, null, "{6F33949A-B3FF-4B0C-BA99-93CB518AC2C0}",
                null));
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -1979,7 +1979,7 @@ public class SharePointAdaptorTest {
 
     final String goldenContents = "attachment contents";
     final String goldenContentType = "fake/type";
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new HttpClient() {
       @Override
       public FileInfo issueGetRequest(URL url,
@@ -2058,7 +2058,7 @@ public class SharePointAdaptorTest {
     final String site = "http://localhost:1/sites/SiteCollection";
     final String attachmentId = site 
         + "/Lists/Custom List/Attachments/2/1046000.pdf";
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new HttpClient() {
       @Override
       public FileInfo issueGetRequest(URL url,
@@ -2111,7 +2111,7 @@ public class SharePointAdaptorTest {
     final String attachmentId = site + "/Lists/Custom List/Attachments/2/104600"
         + "0.pdf";
 
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new HttpClient() {
       @Override
       public FileInfo issueGetRequest(URL url,
@@ -2169,7 +2169,7 @@ public class SharePointAdaptorTest {
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_2_LI_CONTENT_EXCHANGE)
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_2_A_CONTENT_EXCHANGE);
 
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -2321,7 +2321,7 @@ public class SharePointAdaptorTest {
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_2_LI_CONTENT_EXCHANGE)
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_2_A_CONTENT_EXCHANGE);
 
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -2426,7 +2426,7 @@ public class SharePointAdaptorTest {
         .register(new URLSegmentsExchange(
             "http://localhost:1/sites/SiteCollection/Lists/Custom List/2_.000",
           true, null, null, "{6F33949A-B3FF-4B0C-BA99-93CB518AC2C0}", "2"));
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -2474,7 +2474,7 @@ public class SharePointAdaptorTest {
           true, null, null, "{6F33949A-B3FF-4B0C-BA99-93CB518AC2C0}", "2"));
     final String goldenContents = "msg contents";
     final String goldenContentType = "application/octet-stream";
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new HttpClient() {
           @Override
           public FileInfo issueGetRequest(URL url,
@@ -2551,7 +2551,7 @@ public class SharePointAdaptorTest {
                 "ows_ScopeId='2;#{2E29615C-59E7-493B-B08A-3642949CC069}'",
                 "ows_ScopeId='2;#{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}'"));
 
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -2593,7 +2593,7 @@ public class SharePointAdaptorTest {
 
     MockUserGroupSoap mockUserGroupSoap = new MockUserGroupSoap(users);
 
-    adaptor = new SharePointAdaptor(
+    adaptor = new SharePointConnector(
         initableSoapFactory
           .endpoint(
               "http://localhost:1/sites/SiteCollection/_vti_bin/UserGroup.asmx",
@@ -2706,7 +2706,7 @@ public class SharePointAdaptorTest {
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_1_LI_CONTENT_EXCHANGE)
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_1_F_CONTENT_EXCHANGE);
 
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -2859,7 +2859,7 @@ public class SharePointAdaptorTest {
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_1_LI_CONTENT_EXCHANGE)
         .register(SITES_SITECOLLECTION_LISTS_CUSTOMLIST_1_F_CONTENT_EXCHANGE);
 
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -2898,7 +2898,7 @@ public class SharePointAdaptorTest {
 
     // Force a full batch of 2 and a final batch of 1.
     config.overrideKey("feed.maxUrls", "2");
-    adaptor = new SharePointAdaptor(MockSoapFactory.blank()
+    adaptor = new SharePointConnector(MockSoapFactory.blank()
         .endpoint(VS_ENDPOINT, MockSiteData.blank()
           .register(VS_CONTENT_EXCHANGE)
           .register(CD_CONTENT_EXCHANGE
@@ -2963,7 +2963,7 @@ public class SharePointAdaptorTest {
             .register(SITES_SITECOLLECTION_S_CONTENT_EXCHANGE)
             .register(SITES_SITECOLLECTION_SC_CONTENT_EXCHANGE));
 
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -3053,7 +3053,7 @@ public class SharePointAdaptorTest {
     };
     SoapFactory siteDataFactory = MockSoapFactory.blank()
         .endpoint(VS_ENDPOINT, countingSiteData);
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -3144,7 +3144,7 @@ public class SharePointAdaptorTest {
     };
     SoapFactory siteDataFactory = MockSoapFactory.blank()
         .endpoint(VS_ENDPOINT, countingSiteData);
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -3164,7 +3164,7 @@ public class SharePointAdaptorTest {
   public void testModifiedGetDocIdsClient() throws Exception {
     final String getChangesContentDatabase
         = loadTestString("testModifiedGetDocIdsClient.changes-cd.xml");
-    adaptor = new SharePointAdaptor(initableSoapFactory,
+    adaptor = new SharePointConnector(initableSoapFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -3215,7 +3215,7 @@ public class SharePointAdaptorTest {
                     "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;"
                         + "634762601982930000;728",
                     600, getChangesSiteCollection728, false)));
-    adaptor = new SharePointAdaptor(siteDataFactory,
+    adaptor = new SharePointConnector(siteDataFactory,
         new UnsupportedHttpClient(), executorFactory,
         new MockAuthenticationClientFactoryForms(),
         new UnsupportedActiveDirectoryClientFactory());
@@ -3359,7 +3359,7 @@ public class SharePointAdaptorTest {
   
   @Test
   public void testIssueGetRequestWithMoreThanMaxRedirect() throws Exception {
-    HttpClient client = new SharePointAdaptor.HttpClientImpl(){
+    HttpClient client = new SharePointConnector.HttpClientImpl(){
       @Override
       public HttpURLConnection getHttpURLConnection(URL url)
           throws IOException {
@@ -3374,7 +3374,7 @@ public class SharePointAdaptorTest {
   
   @Test
   public void testIssueGetRequestWithSameAsMaxRedirect() throws Exception {
-    HttpClient client = new SharePointAdaptor.HttpClientImpl(){
+    HttpClient client = new SharePointConnector.HttpClientImpl(){
       int requestCount = 0;
       @Override
       public HttpURLConnection getHttpURLConnection(URL url)
@@ -3401,7 +3401,7 @@ public class SharePointAdaptorTest {
   
   @Test
   public void testIssueGetRequestWithHttpOk() throws Exception {
-    HttpClient client = new SharePointAdaptor.HttpClientImpl(){
+    HttpClient client = new SharePointConnector.HttpClientImpl(){
       @Override
       public HttpURLConnection getHttpURLConnection(URL url)
           throws IOException {
@@ -3420,7 +3420,7 @@ public class SharePointAdaptorTest {
   
   @Test
   public void testIssueGetRequestWithZeroRedirectsAllowed() throws Exception {
-    HttpClient client = new SharePointAdaptor.HttpClientImpl(){
+    HttpClient client = new SharePointConnector.HttpClientImpl(){
       int requestCount = 0;
       @Override
       public HttpURLConnection getHttpURLConnection(URL url)
@@ -3444,7 +3444,7 @@ public class SharePointAdaptorTest {
 
   @Test
   public void testIssueGetRequestWithRedirect() throws Exception {
-    HttpClient client = new SharePointAdaptor.HttpClientImpl(){
+    HttpClient client = new SharePointConnector.HttpClientImpl(){
       @Override
       public HttpURLConnection getHttpURLConnection(URL url)
           throws IOException {
@@ -3480,54 +3480,54 @@ public class SharePointAdaptorTest {
   public void testEncodeSharePointUrl() throws Exception {
     //Just host
     assertEquals("http://intranet.example.com",
-        SharePointAdaptor.encodeSharePointUrl(
+        SharePointConnector.encodeSharePointUrl(
             "http://intranet.example.com", true).toString());
     // No query params
     assertEquals("http://intranet.example.com/team%20site/page.aspx",
-        SharePointAdaptor.encodeSharePointUrl(
+        SharePointConnector.encodeSharePointUrl(
             "http://intranet.example.com/team site/page.aspx", true)
         .toString());
     // Query params needs encoding
     assertEquals("https://localshost:80/team%20site/Final.aspx?q=%7Bdata%7D",
-        SharePointAdaptor.encodeSharePointUrl(
+        SharePointConnector.encodeSharePointUrl(
             "https://localshost:80/team site/Final.aspx?q={data}", true)
         .toString());
     // Host with query params
     assertEquals("https://localshost:8080/?q=%7Bdata%20more%7D",
-        SharePointAdaptor.encodeSharePointUrl(
+        SharePointConnector.encodeSharePointUrl(
             "https://localshost:8080?q={data more}", true).toString());
   }
 
   @Test
   public void testSharePointUrlNullInputUrl() {
-    SharePointAdaptor adaptor = new SharePointAdaptor();
+    SharePointConnector adaptor = new SharePointConnector();
     thrown.expect(NullPointerException.class);
     adaptor.new SharePointUrl(null, "");
   }
   
   @Test
   public void testSharePointUrlConstructor() {
-    SharePointAdaptor adaptor = new SharePointAdaptor();
+    SharePointConnector adaptor = new SharePointConnector();
     adaptor.new SharePointUrl("http://sharepoint.intranet.com", "");
   }
   
   @Test
   public void testSharePointUrlConstructorWithSpaceInUrl() {
-    SharePointAdaptor adaptor = new SharePointAdaptor();
+    SharePointConnector adaptor = new SharePointConnector();
     adaptor.new SharePointUrl(
         "http://sharepoint.intranet.com/sites/new site collection", "");
   }
   
   @Test
   public void testSharePointUrlMalformedInput() {
-    SharePointAdaptor adaptor = new SharePointAdaptor();
+    SharePointConnector adaptor = new SharePointConnector();
     thrown.expect(InvalidConfigurationException.class);
     adaptor.new SharePointUrl("malformed.sharepoint.com", "");
   }
   
   @Test
   public void testSharePointUrlAndRootUrl() {
-    SharePointAdaptor adaptor = new SharePointAdaptor();
+    SharePointConnector adaptor = new SharePointConnector();
     SharePointUrl sharePointUrl = adaptor.new SharePointUrl(
         "http://localhost:1000/sites/collection/", "");
     assertEquals("http://localhost:1000/sites/collection",
@@ -3537,7 +3537,7 @@ public class SharePointAdaptorTest {
   
   @Test
   public void testSharePointUrlIsSiteCollectionUrl() {
-    SharePointAdaptor adaptor = new SharePointAdaptor();
+    SharePointConnector adaptor = new SharePointConnector();
     SharePointUrl sharePointUrl = adaptor.new SharePointUrl(
         "http://localhost:1000/sites/collection/", "");
     assertTrue(sharePointUrl.isSiteCollectionUrl());
@@ -3579,7 +3579,7 @@ public class SharePointAdaptorTest {
 
   private static String loadResourceAsString(String resource)
       throws IOException {
-    return IOHelper.readInputStreamToString(SharePointAdaptorTest.class
+    return IOHelper.readInputStreamToString(SharePointConnectorTest.class
         .getResourceAsStream(resource), Charset.forName("UTF-8"));
   }
 

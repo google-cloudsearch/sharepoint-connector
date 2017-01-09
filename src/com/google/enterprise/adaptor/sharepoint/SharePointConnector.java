@@ -35,7 +35,6 @@ import com.google.enterprise.adaptor.PollingIncrementalLister;
 import com.google.enterprise.adaptor.Principal;
 import com.google.enterprise.adaptor.Request;
 import com.google.enterprise.adaptor.Response;
-import com.google.enterprise.adaptor.StartupException;
 import com.google.enterprise.adaptor.UserPrincipal;
 import com.google.enterprise.adaptor.sharepoint.ActiveDirectoryClientFactory.ActiveDirectoryClientFactoryImpl;
 import com.google.enterprise.adaptor.sharepoint.RareModificationCache.CachedList;
@@ -46,7 +45,6 @@ import com.google.enterprise.adaptor.sharepoint.SiteDataClient.CursorPaginator;
 import com.google.enterprise.adaptor.sharepoint.SiteDataClient.Paginator;
 import com.google.enterprise.adaptor.sharepoint.SiteDataClient.WebServiceIOException;
 import com.google.enterprise.adaptor.sharepoint.SiteDataClient.XmlProcessingException;
-
 import com.microsoft.schemas.sharepoint.soap.ContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabases;
 import com.microsoft.schemas.sharepoint.soap.Files;
@@ -84,16 +82,8 @@ import com.microsoft.schemas.sharepoint.soap.people.ArrayOfString;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PrincipalInfo;
 import com.microsoft.schemas.sharepoint.soap.people.SPPrincipalType;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Element;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.Method;
 import java.net.Authenticator;
 import java.net.ConnectException;
 import java.net.HttpURLConnection;
@@ -134,7 +124,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import javax.xml.namespace.QName;
 import javax.xml.ws.BindingProvider;
 import javax.xml.ws.EndpointReference;
@@ -143,12 +132,14 @@ import javax.xml.ws.Service;
 import javax.xml.ws.WebServiceException;
 import javax.xml.ws.handler.MessageContext;
 import javax.xml.ws.wsaddressing.W3CEndpointReferenceBuilder;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
-/**
- * SharePoint Adaptor for the GSA.
- */
-public class SharePointAdaptor extends AbstractAdaptor
-    implements PollingIncrementalLister {
+/** SharePoint Adaptor for the GSA. */
+public class SharePointConnector extends AbstractAdaptor implements PollingIncrementalLister {
   /** Charset used in generated HTML responses. */
   private static final Charset CHARSET = Charset.forName("UTF-8");
   private static final String XMLNS_DIRECTORY
@@ -342,8 +333,7 @@ public class SharePointAdaptor extends AbstractAdaptor
     FILE_EXTENSION_TO_MIME_TYPE_MAPPING = Collections.unmodifiableMap(map);
   }
 
-  private static final Logger log
-      = Logger.getLogger(SharePointAdaptor.class.getName());
+  private static final Logger log = Logger.getLogger(SharePointConnector.class.getName());
 
   /**
    * Map from Site or Web URL to SiteAdaptor object used to communicate with
@@ -440,14 +430,16 @@ public class SharePointAdaptor extends AbstractAdaptor
         }
       };
 
-  public SharePointAdaptor() {
+  public SharePointConnector() {
     this(new SoapFactoryImpl(), new HttpClientImpl(),
         new CachedThreadPoolFactory(), new AuthenticationClientFactoryImpl(),
         new ActiveDirectoryClientFactoryImpl());
   }
 
   @VisibleForTesting
-  SharePointAdaptor(SoapFactory soapFactory, HttpClient httpClient,
+  SharePointConnector(
+      SoapFactory soapFactory,
+      HttpClient httpClient,
       Callable<ExecutorService> executorFactory,
       AuthenticationClientFactory authenticationClientFactory,
       ActiveDirectoryClientFactory adClientFactory) {
@@ -1576,7 +1568,7 @@ public class SharePointAdaptor extends AbstractAdaptor
   }
 
   public static void main(String[] args) {
-    AbstractAdaptor.main(new SharePointAdaptor(), args);
+    AbstractAdaptor.main(new SharePointConnector(), args);
   }
 
   private SiteAdaptor getAdaptorForDocId(DocId docId) throws IOException {

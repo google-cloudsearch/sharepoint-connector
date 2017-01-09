@@ -20,7 +20,7 @@
   <property name="lib.dir" location="lib"/>
   <property name="junit.jar" location="${lib.dir}/junit-4.8.2.jar"/>
   <property name="adaptor.class"
-    value="com.google.enterprise.adaptor.sharepoint.SharePointAdaptor"/>
+    value="com.google.enterprise.adaptor.sharepoint.SharePointConnector"/>
   <property name="adaptor2.class"
     value="com.google.enterprise.adaptor.sharepoint.SharePointUserProfileAdaptor"/>
   <property name="adaptor.args" value=""/>

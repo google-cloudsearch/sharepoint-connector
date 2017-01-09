@@ -17,13 +17,11 @@ package com.google.enterprise.adaptor.sharepoint;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.LoadingCache;
-
 import com.microsoft.schemas.sharepoint.soap.List;
 import com.microsoft.schemas.sharepoint.soap.PolicyUser;
 import com.microsoft.schemas.sharepoint.soap.TrueFalseType;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
-
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Locale;
@@ -129,7 +127,7 @@ class RareModificationCache {
       for (PolicyUser policyUser : vs.getPolicies().getPolicyUser()) {
         long deny = policyUser.getDenyMask().longValue();
         // If at least one necessary bit is masked, then deny user.
-        if ((SharePointAdaptor.LIST_ITEM_MASK & deny) != 0) {
+        if ((SharePointConnector.LIST_ITEM_MASK & deny) != 0) {
           policyContainsDeny = true;
           break;
         }
