@@ -10,10 +10,10 @@
   <property name="build-src.dir" location="${build.dir}/src"/>
   <property name="build-test.dir" location="${build.dir}/test"/>
   <property name="build-instrument.dir" location="${build.dir}/instrument"/>
-  <property name="adaptor.clone.dir" location="lib/plexi"/>
+  <property name="adaptor.clone.dir" location="lib"/>
   <!-- Used for checking if adaptor.jar has been changed. -->
   <property name="adaptor.jar.default"
-    value="${adaptor.clone.dir}/build/dist/adaptor/adaptor-withlib.jar"/>
+    value="${adaptor.clone.dir}/adaptor-20170110-withlib.jar"/>
   <property name="adaptor.jar" value="${adaptor.jar.default}"/>
   <property name="dist.dir" location="dist"/>
   <property name="resource.dir" location="resources"/>
@@ -60,49 +60,7 @@
 
   <target name="build"
     depends="-real-build,-check-instrument-uptodate,clean-instrument"
-    description="Build source"/>
-
-  <target name="-plexi-check-submodule">
-    <condition property="plexi.is-not-submodule">
-      <not>
-        <equals arg1="${adaptor.jar.default}" arg2="${adaptor.jar}"/>
-      </not>
-    </condition>
-    <condition property="tmp.plexi.valid-setup">
-      <or>
-        <isset property="plexi.is-not-submodule"/>
-        <available file="${adaptor.clone.dir}/.git"/>
-      </or>
-    </condition>
-    <fail unless="tmp.plexi.valid-setup">Invalid setup:
-No lib/plexi submodule and using default adaptor.jar property.
-
-You need to run "git submodule init; git submodule update" to initialize the
-lib/plexi submodule or add the the command line argument
--Dadaptor.jar=path/to/adaptor-withlib.jar to point to the adaptor library.
-    </fail>
-  </target>
-
-  <target name="-plexi-test-uptodate" depends="-plexi-check-submodule">
-    <condition property="plexi.uptodate">
-      <or>
-        <isset property="plexi.is-not-submodule"/>
-        <uptodate targetfile="${adaptor.jar}">
-          <srcfiles dir="${adaptor.clone.dir}"
-            excludes=".git/** build/** dist/** **.swp"/>
-        </uptodate>
-      </or>
-    </condition>
-  </target>
-
-  <target name="-plexi-build" depends="-plexi-test-uptodate"
-    unless="plexi.uptodate">
-    <echo message="Detected Plexi changes. Re-packaging Plexi..."/>
-    <ant antfile="${adaptor.clone.dir}/build.xml" dir="${adaptor.clone.dir}"
-      target="dist" inheritAll="false">
-      <property name="adaptorlib.suffix" value=""/>
-    </ant>
-  </target>
+    description="Build source"/>  
 
   <target name="-generate-test-uptodate">
     <uptodate property="generate.uptodate"
@@ -190,7 +148,7 @@ lib/plexi submodule or add the the command line argument
       todir="${build-generate.dir}/com/microsoft/webservices/sharepointportalserver/userprofilechangeservice/"/>
   </target>
 
-  <target name="-real-build" depends="-plexi-build,-generate">
+  <target name="-real-build" depends="-generate">
     <mkdir dir="${build-src.dir}"/>
 
     <javac srcdir="${src.dir}" destdir="${build-src.dir}" debug="true"
