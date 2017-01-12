@@ -1,4 +1,4 @@
-// Copyright 2012 Google Inc. All Rights Reserved.
+/*// Copyright 2012 Google Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -134,9 +134,9 @@ import javax.xml.ws.Holder;
 import javax.xml.ws.WebServiceException;
 import javax.xml.ws.handler.MessageContext;
 
-/**
+*//**
  * Test cases for {@link SharePointConnector}.
- */
+ *//*
 public class SharePointConnectorTest {
   private static final String AUTH_ENDPOINT
       = "http://localhost:1/_vti_bin/Authentication.asmx";
@@ -265,12 +265,12 @@ public class SharePointConnectorTest {
   @Rule
   public ExpectedException thrown = ExpectedException.none();
 
-  /**
+  *//**
    * JAXBContext is expensive to create and is created as part of the class'
    * initialization. Do this in a separately so that the timing for this
    * initalization does not count toward the first real test run. It looks like
    * a bug when a faster test takes longer, just because it ran first.
-   */
+   *//*
   @BeforeClass
   public static void initJaxbContext() {
     SharePointConnector.init();
@@ -4150,9 +4150,9 @@ public class SharePointConnectorTest {
     }
   }
 
-  /**
+  *//**
    * Throw UnsupportedOperationException for all calls.
-   */
+   *//*
   private static class UnsupportedSiteData extends DelegatingSiteData
       implements BindingProvider {
     private final Map<String, Object> requestContext
@@ -4415,7 +4415,7 @@ public class SharePointConnectorTest {
           addToList(siteAndWebList, sawe));
     }
 
-    /** Creates a new list that has the item appended. */
+    *//** Creates a new list that has the item appended. *//*
     private <T> List<T> addToList(List<T> existingList, T item) {
       List<T> l = new ArrayList<T>(existingList);
       l.add(item);
@@ -4758,3 +4758,4 @@ public class SharePointConnectorTest {
     }    
   }    
 }
+*/

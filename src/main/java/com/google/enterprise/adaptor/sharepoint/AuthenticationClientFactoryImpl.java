@@ -15,9 +15,8 @@
 package com.google.enterprise.adaptor.sharepoint;
 
 import com.google.common.base.Strings;
-import com.google.enterprise.adaptor.InvalidConfigurationException;
 import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
-
+import com.google.enterprise.springboard.sdk.InvalidConfigurationException;
 import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationSoap;
 
 import java.io.IOException;
@@ -49,9 +48,10 @@ public class AuthenticationClientFactoryImpl
   private final Service authenticationService;
     
     public AuthenticationClientFactoryImpl() {
-      this.authenticationService = Service.create(
-          AuthenticationSoap.class.getResource("Authentication.wsdl"),
-          new QName(XMLNS, "Authentication"));
+    this.authenticationService =
+        Service.create(
+            AuthenticationSoap.class.getResource("/Authentication.wsdl"),
+            new QName(XMLNS, "Authentication"));
     }
 
     private static String handleEncoding(String endpoint) {

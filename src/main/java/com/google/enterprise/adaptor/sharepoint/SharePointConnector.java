@@ -14,6 +14,16 @@
 
 package com.google.enterprise.adaptor.sharepoint;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
+import com.google.api.client.http.ByteArrayContent;
+import com.google.api.client.http.InputStreamContent;
+import com.google.api.client.util.DateTime;
+import com.google.api.services.springboardindex.model.ExternalGroup;
+import com.google.api.services.springboardindex.model.PollQueueRequest;
+import com.google.api.services.springboardindex.model.Principal;
+import com.google.api.services.springboardindex.model.PushEntry;
+import com.google.api.services.springboardindex.model.QueueEntry;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.google.common.cache.CacheBuilder;
@@ -21,21 +31,6 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.TreeMultimap;
 import com.google.common.primitives.Ints;
-import com.google.enterprise.adaptor.AbstractAdaptor;
-import com.google.enterprise.adaptor.Acl;
-import com.google.enterprise.adaptor.AdaptorContext;
-import com.google.enterprise.adaptor.Config;
-import com.google.enterprise.adaptor.DocId;
-import com.google.enterprise.adaptor.DocIdEncoder;
-import com.google.enterprise.adaptor.DocIdPusher;
-import com.google.enterprise.adaptor.GroupPrincipal;
-import com.google.enterprise.adaptor.IOHelper;
-import com.google.enterprise.adaptor.InvalidConfigurationException;
-import com.google.enterprise.adaptor.PollingIncrementalLister;
-import com.google.enterprise.adaptor.Principal;
-import com.google.enterprise.adaptor.Request;
-import com.google.enterprise.adaptor.Response;
-import com.google.enterprise.adaptor.UserPrincipal;
 import com.google.enterprise.adaptor.sharepoint.ActiveDirectoryClientFactory.ActiveDirectoryClientFactoryImpl;
 import com.google.enterprise.adaptor.sharepoint.RareModificationCache.CachedList;
 import com.google.enterprise.adaptor.sharepoint.RareModificationCache.CachedVirtualServer;
@@ -45,6 +40,17 @@ import com.google.enterprise.adaptor.sharepoint.SiteDataClient.CursorPaginator;
 import com.google.enterprise.adaptor.sharepoint.SiteDataClient.Paginator;
 import com.google.enterprise.adaptor.sharepoint.SiteDataClient.WebServiceIOException;
 import com.google.enterprise.adaptor.sharepoint.SiteDataClient.XmlProcessingException;
+import com.google.enterprise.springboard.sdk.Acl;
+import com.google.enterprise.springboard.sdk.Application;
+import com.google.enterprise.springboard.sdk.Config;
+import com.google.enterprise.springboard.sdk.Connector;
+import com.google.enterprise.springboard.sdk.ConnectorContext;
+import com.google.enterprise.springboard.sdk.ContentTemplate;
+import com.google.enterprise.springboard.sdk.IncrementalChangeHandler;
+import com.google.enterprise.springboard.sdk.IndexingService;
+import com.google.enterprise.springboard.sdk.InvalidConfigurationException;
+import com.google.enterprise.springboard.sdk.ItemRetriever;
+import com.google.enterprise.springboard.sdk.traverser.TraverserConfiguration;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabases;
 import com.microsoft.schemas.sharepoint.soap.Files;
@@ -78,7 +84,6 @@ import com.microsoft.schemas.sharepoint.soap.directory.GetUserCollectionFromSite
 import com.microsoft.schemas.sharepoint.soap.directory.User;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.ArrayOfPrincipalInfo;
-import com.microsoft.schemas.sharepoint.soap.people.ArrayOfString;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PrincipalInfo;
 import com.microsoft.schemas.sharepoint.soap.people.SPPrincipalType;
@@ -94,7 +99,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.UnknownHostException;
-import java.nio.charset.Charset;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -138,23 +142,19 @@ import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
-/** SharePoint Adaptor for the GSA. */
-public class SharePointConnector extends AbstractAdaptor implements PollingIncrementalLister {
-  /** Charset used in generated HTML responses. */
-  private static final Charset CHARSET = Charset.forName("UTF-8");
-  private static final String XMLNS_DIRECTORY
-      = "http://schemas.microsoft.com/sharepoint/soap/directory/";
-  
+/** SharePoint Connector for the GSA. */
+public class SharePointConnector implements Connector, ItemRetriever, IncrementalChangeHandler {
+  private static final String XMLNS_DIRECTORY =
+      "http://schemas.microsoft.com/sharepoint/soap/directory/";
+
   /** SharePoint's namespace. */
-  private static final String XMLNS
-      = "http://schemas.microsoft.com/sharepoint/soap/";
+  private static final String XMLNS = "http://schemas.microsoft.com/sharepoint/soap/";
 
   /**
    * The data element within a self-describing XML blob. See
    * http://msdn.microsoft.com/en-us/library/windows/desktop/ms675943.aspx .
    */
-  private static final QName DATA_ELEMENT
-      = new QName("urn:schemas-microsoft-com:rowset", "data");
+  private static final QName DATA_ELEMENT = new QName("urn:schemas-microsoft-com:rowset", "data");
   /**
    * The row element within a self-describing XML blob. See
    * http://msdn.microsoft.com/en-us/library/windows/desktop/ms675943.aspx .
@@ -167,8 +167,6 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
    */
   private static final String OWS_FSOBJTYPE_ATTRIBUTE = "ows_FSObjType";
   private static final String OWS_AUTHOR_ATTRIBUTE = "ows_Author";
-  /** Row attribute that contains the title of the List Item. */
-  private static final String OWS_TITLE_ATTRIBUTE = "ows_Title";
   /**
    * Row attribute that contains a URL-like string identifying the object.
    * Sometimes this can be modified (by turning spaces into %20 and the like) to
@@ -197,22 +195,22 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   /** Provides the number of attachments the list item has. */
   private static final String OWS_ATTACHMENTS_ATTRIBUTE = "ows_Attachments";
   /** The last time metadata or content was modified. */
-  private static final String OWS_MODIFIED_ATTRIBUTE
-      = "ows_Modified";
+  private static final String OWS_MODIFIED_ATTRIBUTE = "ows_Modified";
   /**
    * Matches a SP-encoded value that contains one or more values. See {@link
-   * SiteAdaptor.addMetadata}.
+   * SiteConnector.addMetadata}.
    */
-  private static final Pattern ALTERNATIVE_VALUE_PATTERN
-      = Pattern.compile("^\\d+;#");
+  private static final Pattern ALTERNATIVE_VALUE_PATTERN = Pattern.compile("^\\d+;#");
 
-  static final long LIST_ITEM_MASK = SPBasePermissions.OPEN 
-      | SPBasePermissions.VIEWPAGES | SPBasePermissions.VIEWLISTITEMS;
+  static final long LIST_ITEM_MASK =
+      SPBasePermissions.OPEN | SPBasePermissions.VIEWPAGES | SPBasePermissions.VIEWLISTITEMS;
 
-  private static final long READ_SECURITY_LIST_ITEM_MASK
-      = SPBasePermissions.OPEN | SPBasePermissions.VIEWPAGES 
-      | SPBasePermissions.VIEWLISTITEMS | SPBasePermissions.MANAGELISTS;
-  
+  private static final long READ_SECURITY_LIST_ITEM_MASK =
+      SPBasePermissions.OPEN
+          | SPBasePermissions.VIEWPAGES
+          | SPBasePermissions.VIEWLISTITEMS
+          | SPBasePermissions.MANAGELISTS;
+
   private static final long FULL_READ_PERMISSION_MASK = SPBasePermissions.OPEN
       | SPBasePermissions.VIEWLISTITEMS | SPBasePermissions.OPENITEMS
       | SPBasePermissions.VIEWVERSIONS | SPBasePermissions.VIEWPAGES
@@ -226,28 +224,32 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   private static final String IDENTITY_CLAIMS_PREFIX = "i:0";
 
   private static final String OTHER_CLAIMS_PREFIX = "c:0";
-  
+
   private static final String METADATA_OBJECT_TYPE = "google:objecttype";
-  private static final String METADATA_PARENT_WEB_TITLE 
-      = "sharepoint:parentwebtitle";
+  private static final String METADATA_PARENT_WEB_TITLE = "sharepoint:parentwebtitle";
   private static final String METADATA_LIST_GUID = "sharepoint:listguid";
 
-  private static final Pattern METADATA_ESCAPE_PATTERN
-      = Pattern.compile("_x([0-9a-f]{4})_");
+  private static final Pattern METADATA_ESCAPE_PATTERN = Pattern.compile("_x([0-9a-f]{4})_");
 
   private static final Pattern INTEGER_PATTERN = Pattern.compile("[0-9]+");
 
   private static final String HTML_NAME = "[a-zA-Z:_][a-zA-Z:_0-9.-]*";
-  private static final Pattern HTML_TAG_PATTERN
-      = Pattern.compile(
+  private static final Pattern HTML_TAG_PATTERN =
+      Pattern.compile(
           // Tag and attributes
-          "<" + HTML_NAME + "(?:[ \n\t]+" + HTML_NAME + "="
-            // Attribute values
-            + "(?:'[^']*'|\"[^\"]*\"|[a-zA-Z0-9._:-]*))*[ \n\t]*/?>"
-          // Close tags
-          + "|</" + HTML_NAME + ">", Pattern.DOTALL);
-  private static final Pattern HTML_ENTITY_PATTERN
-      = Pattern.compile("&(#[0-9]+|[a-zA-Z0-9]+);");
+          "<"
+              + HTML_NAME
+              + "(?:[ \n\t]+"
+              + HTML_NAME
+              + "="
+              // Attribute values
+              + "(?:'[^']*'|\"[^\"]*\"|[a-zA-Z0-9._:-]*))*[ \n\t]*/?>"
+              // Close tags
+              + "|</"
+              + HTML_NAME
+              + ">",
+          Pattern.DOTALL);
+  private static final Pattern HTML_ENTITY_PATTERN = Pattern.compile("&(#[0-9]+|[a-zA-Z0-9]+);");
   private static final Map<String, String> HTML_ENTITIES;
   static {
     HashMap<String, String> map = new HashMap<String, String>();
@@ -261,23 +263,23 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   }
 
   private static final String SITE_COLLECTION_ADMIN_FRAGMENT = "admin";
-  
+
   private static final int DEFAULT_MAX_REDIRECTS_TO_FOLLOW = 20;
 
   private int socketTimeoutMillis;
   private int readTimeOutMillis;
   private int maxRedirectsToFollow;
-  
-  // flag controls whether adaptor leniently corrects common URL mistakes
+
+  // flag controls whether connector leniently corrects common URL mistakes
   // like presence of brackets "[]" in path or "_" in hostname. if true
-  // also makes adaptor handle redirects instead of relying on default
+  // also makes connector handle redirects instead of relying on default
   // Java HTTP redirects, because otherwise those URLs wouldn't receive
   // this lenient encoding treatment.
   private boolean performBrowserLeniency;
-  
+
   private boolean performSidLookup;
-  
-  private boolean useFlatAcls = false;
+
+  private IndexingService indexingService;
 
   /**
    * Mapping of mime-types used by SharePoint to ones that the GSA comprehends.
@@ -313,61 +315,57 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     map.put("application/vnd.ms-word.document.macroEnabled.12", "application/"
         + "vnd.openxmlformats-officedocument.wordprocessingml.document");
     // Extension .pptm
-    map.put("application/vnd.ms-powerpoint.presentation.macroEnabled.12",
-        "application/"
-        + "vnd.openxmlformats-officedocument.presentationml.presentation");
+    map.put(
+        "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+        "application/" + "vnd.openxmlformats-officedocument.presentationml.presentation");
     // Extension .xlsm
     map.put("application/vnd.ms-excel.sheet.macroEnabled.12",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
     MIME_TYPE_MAPPING = Collections.unmodifiableMap(map);
   }
-  
+
   private static final Map<String, String> FILE_EXTENSION_TO_MIME_TYPE_MAPPING;
   static {
     Map<String, String> map = new HashMap<String, String>();
-    
+
     // Map .msg files to mime type application/vnd.ms-outlook
     map.put(".msg", "application/vnd.ms-outlook");
-    
+
     FILE_EXTENSION_TO_MIME_TYPE_MAPPING = Collections.unmodifiableMap(map);
   }
 
   private static final Logger log = Logger.getLogger(SharePointConnector.class.getName());
 
+  /** Map from Site or Web URL to SiteConnector object used to communicate with that Site/Web. */
+  private final ConcurrentMap<String, SiteConnector> siteConnectors =
+      new ConcurrentSkipListMap<String, SiteConnector>();
+  private static final String VIRTUAL_SERVER_ID = "ROOT";
   /**
-   * Map from Site or Web URL to SiteAdaptor object used to communicate with
-   * that Site/Web.
+   * The URL of Virtual Server or Site Collection that we use to bootstrap our SP instance
+   * knowledge.
    */
-  private final ConcurrentMap<String, SiteAdaptor> siteAdaptors
-      = new ConcurrentSkipListMap<String, SiteAdaptor>();
-  private final DocId virtualServerDocId = new DocId("");
-  private AdaptorContext context;  
-  /**
-   * The URL of Virtual Server or Site Collection that we use to 
-   * bootstrap our SP instance knowledge.
-   */ 
   private SharePointUrl sharePointUrl;
   /**
-   * Cache that provides immutable {@link MemberIdMapping} instances for the
-   * provided site URL key. Since {@code MemberIdMapping} is immutable, updating
-   * the cache creates new mapping instances that replace the previous value.
+   * Cache that provides immutable {@link MemberIdMapping} instances for the provided site URL key.
+   * Since {@code MemberIdMapping} is immutable, updating the cache creates new mapping instances
+   * that replace the previous value.
    */
-  private LoadingCache<String, MemberIdMapping> memberIdsCache
-      = CacheBuilder.newBuilder()
-        .refreshAfterWrite(30, TimeUnit.MINUTES)
-        .expireAfterWrite(45, TimeUnit.MINUTES)
-        .build(new MemberIdsCacheLoader());
-  private LoadingCache<String, MemberIdMapping> siteUserCache
-      = CacheBuilder.newBuilder()
-        .refreshAfterWrite(30, TimeUnit.MINUTES)
-        .expireAfterWrite(45, TimeUnit.MINUTES)
-        .build(new SiteUserCacheLoader());
+  private LoadingCache<String, MemberIdMapping> memberIdsCache =
+      CacheBuilder.newBuilder()
+          .refreshAfterWrite(30, TimeUnit.MINUTES)
+          .expireAfterWrite(45, TimeUnit.MINUTES)
+          .build(new MemberIdsCacheLoader());
+
+  private LoadingCache<String, MemberIdMapping> siteUserCache =
+      CacheBuilder.newBuilder()
+          .refreshAfterWrite(30, TimeUnit.MINUTES)
+          .expireAfterWrite(45, TimeUnit.MINUTES)
+          .build(new SiteUserCacheLoader());
   private RareModificationCache rareModCache;
-  /** Map from SharePoint Object GUID to last known Change Token for that 
-   * object. */
-  private final ConcurrentSkipListMap<String, String> 
-      objectGuidToChangeIdMapping = new ConcurrentSkipListMap<String, String>();
+  /** Map from SharePoint Object GUID to last known Change Token for that object. */
+  private final ConcurrentSkipListMap<String, String> objectGuidToChangeIdMapping =
+      new ConcurrentSkipListMap<String, String>();
   private final SoapFactory soapFactory;
   /** Client for initiating raw HTTP connections. */
   private final HttpClient httpClient;
@@ -375,15 +373,12 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
 
   private final AuthenticationClientFactory authenticationClientFactory;
   private final ActiveDirectoryClientFactory adClientFactory;
-  
+
   /** Executor service to perform background tasks */
   private ExecutorService executor;
   private boolean xmlValidation;
-  private int feedMaxUrls;
-  private long maxIndexableSize;
-  
-  private String adaptorUserAgent;
-  
+  private String sharepointUserAgent;
+
   private ScheduledThreadPoolExecutor scheduledExecutor;
   private String defaultNamespace;
   /** Authenticator instance that authenticates with SP. */
@@ -394,37 +389,35 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   private boolean isSp2007;
   private NtlmAuthenticator ntlmAuthenticator;
   private boolean needToResetDefaultAuthenticator;
-  
+
   private FormsAuthenticationHandler authenticationHandler;
   private ActiveDirectoryClient adClient;
   private static final TimeZone gmt = TimeZone.getTimeZone("GMT");
   /** RFC 822 date format, as updated by RFC 1123. */
-  private final ThreadLocal<DateFormat> dateFormatRfc1123
-      = new ThreadLocal<DateFormat>() {
+  private final ThreadLocal<DateFormat> dateFormatRfc1123 =
+      new ThreadLocal<DateFormat>() {
         @Override
         protected DateFormat initialValue() {
-          DateFormat df = new SimpleDateFormat(
-              "EEE, dd MMM yyyy HH:mm:ss zzz", Locale.ENGLISH);
+          DateFormat df = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.ENGLISH);
           df.setTimeZone(gmt);
           return df;
         }
       };
-  private final ThreadLocal<DateFormat> modifiedDateFormat
-      = new ThreadLocal<DateFormat>() {
+
+  private final ThreadLocal<DateFormat> modifiedDateFormat =
+      new ThreadLocal<DateFormat>() {
         @Override
         protected DateFormat initialValue() {
-          DateFormat df = new SimpleDateFormat(
-              "yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ENGLISH);
+          DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ENGLISH);
           df.setTimeZone(gmt);
           return df;
         }
       };
-  private final ThreadLocal<DateFormat> listLastModifiedDateFormat
-      = new ThreadLocal<DateFormat>() {
+  private final ThreadLocal<DateFormat> listLastModifiedDateFormat =
+      new ThreadLocal<DateFormat>() {
         @Override
         protected DateFormat initialValue() {
-          DateFormat df = new SimpleDateFormat(
-              "yyyy-MM-dd HH:mm:ss'Z'", Locale.ENGLISH);
+          DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss'Z'", Locale.ENGLISH);
           df.setTimeZone(gmt);
           return df;
         }
@@ -443,8 +436,11 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       Callable<ExecutorService> executorFactory,
       AuthenticationClientFactory authenticationClientFactory,
       ActiveDirectoryClientFactory adClientFactory) {
-    if (soapFactory == null || httpClient == null || executorFactory == null 
-        || authenticationClientFactory == null || adClientFactory == null) {
+    if (soapFactory == null
+        || httpClient == null
+        || executorFactory == null
+        || authenticationClientFactory == null
+        || adClientFactory == null) {
       throw new NullPointerException();
     }
     this.soapFactory = soapFactory;
@@ -474,104 +470,108 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     // allow us to improve the schema itself, but also allow enable users to
     // enable checking as a form of debugging.
     config.addKey("sharepoint.xmlValidation", "false");
-    // 2 MB. We need to know how much of the generated HTML the GSA will index,
-    // because the GSA won't see links outside of that content.
-    config.addKey("sharepoint.maxIndexableSize", "2097152");
-    config.addKey("adaptor.namespace", "Default");
+    config.addKey("connector.namespace", "Default");
     // When running against ADFS authentication, set this to ADFS endpoint.
     config.addKey("sharepoint.sts.endpoint", "");
     // When running against ADFS authentication, set this to realm value.
     // Normally realm value is either http://sharepointurl/_trust or
-    // urn:sharepointenv:com format. You can use 
+    // urn:sharepointenv:com format. You can use
     // Get-SPTrustedIdentityTokenIssuer to get "DefaultProviderRealm" value
     config.addKey("sharepoint.sts.realm", "");
-    // You can override default value of http://sharepointurl/_trust by 
+    // You can override default value of http://sharepointurl/_trust by
     // specifying this property.
     config.addKey("sharepoint.sts.trustLocation", "");
-    // You can override default value of 
-    // http://sharepointurl/_layouts/Authenticate.aspx by specifying this 
+    // You can override default value of
+    // http://sharepointurl/_layouts/Authenticate.aspx by specifying this
     // property.
     config.addKey("sharepoint.sts.login", "");
     // Set this to true when using Live authentication.
     config.addKey("sharepoint.useLiveAuthentication", "false");
-    // Set this to specific user-agent value to be used by adaptor while making
+    // Set this to specific user-agent value to be used by connector while making
     // request to SharePoint
-    config.addKey("adaptor.userAgent", "");
+    config.addKey("sharepoint.userAgent", "");
     // Set this to true when you want to index only single site collection
     config.addKey("sharepoint.siteCollectionOnly", "");
-    // Set this to positive integer value to configure maximum number of 
+    // Set this to positive integer value to configure maximum number of
     // URL redirects allowed to download document contents.
-    config.addKey("adaptor.maxRedirectsToFollow", "");
-    // Set this to true when adaptor needs to encode redirect urls and perform
+    config.addKey("connector.maxRedirectsToFollow", "");
+    // Set this to true when connector needs to encode redirect urls and perform
     // browser leniency for handling unsupported characters in urls.
-    config.addKey("adaptor.lenientUrlRulesAndCustomRedirect", "true");
+    config.addKey("connector.lenientUrlRulesAndCustomRedirect", "true");
     config.addKey("sidLookup.host", "");
     config.addKey("sidLookup.port", "3268");
     config.addKey("sidLookup.username", "");
     config.addKey("sidLookup.password", "");
     config.addKey("sidLookup.method", "standard");
-    // Set this to static factory method name which will return 
+    // Set this to static factory method name which will return
     // custom SamlHandshakeManager object
+    config.addKey("customSamlManager.configPrefix", "customSamlManager");
     config.addKey("sharepoint.customSamlManager", "");
+    config.addKey("sharepoint.webservices.socketTimeoutSecs", "30");
+    config.addKey("sharepoint.webservices.readTimeOutSecs", "180");
   }
 
   @Override
-  public void init(AdaptorContext context) throws Exception {
-    this.context = context;
-    context.setPollingIncrementalLister(this);
+  public void init(ConnectorContext context) throws Exception {
+    checkNotNull(context);
+    context.registerTraverser(
+        new TraverserConfiguration.Builder()
+            .pollRequest(new PollQueueRequest().setStatus(Arrays.asList("modified", "unindexed")))
+            .itemRetriever(this)
+            .hostload(6)
+            .timeout(3, TimeUnit.MINUTES)
+            .build());
+    this.indexingService = checkNotNull(context.getIndexingService());
+    indexingService.unreserve("");
     Config config = context.getConfig();
     SharePointUrl configuredSharePointUrl =
         new SharePointUrl(config.getValue("sharepoint.server"),
             config.getValue("sharepoint.siteCollectionOnly"));
     String username = config.getValue("sharepoint.username");
-    String password = context.getSensitiveValueDecoder().decodeValue(
-        config.getValue("sharepoint.password"));
-    xmlValidation = Boolean.parseBoolean(
-        config.getValue("sharepoint.xmlValidation"));
-    feedMaxUrls = Integer.parseInt(config.getValue("feed.maxUrls"));
-    maxIndexableSize = Integer.parseInt(
-        config.getValue("sharepoint.maxIndexableSize"));
-    defaultNamespace = config.getValue("adaptor.namespace");
+    String password = config.getValue("sharepoint.password");
+    xmlValidation = Boolean.parseBoolean(config.getValue("sharepoint.xmlValidation"));
+    defaultNamespace = config.getValue("connector.namespace");
     String stsendpoint = config.getValue("sharepoint.sts.endpoint");
     String stsrealm = config.getValue("sharepoint.sts.realm");
     boolean useLiveAuthentication = Boolean.parseBoolean(
         config.getValue("sharepoint.useLiveAuthentication"));
-    String customSamlManager = config.getValue("sharepoint.customSamlManager"); 
-    socketTimeoutMillis = Integer.parseInt(
-        config.getValue("adaptor.docHeaderTimeoutSecs")) * 1000;
-    readTimeOutMillis = Integer.parseInt(
-        config.getValue("adaptor.docContentTimeoutSecs")) * 1000;
-    adaptorUserAgent = config.getValue("adaptor.userAgent").trim();
-    String maxRedirectsToFollowStr = config.getValue(
-        "adaptor.maxRedirectsToFollow");
-    performBrowserLeniency = Boolean.parseBoolean(config.getValue(
-        "adaptor.lenientUrlRulesAndCustomRedirect"));
-    useFlatAcls = Boolean.parseBoolean(config.getValue("adaptor.useFlatAcls"));
+    String customSamlManager = config.getValue("sharepoint.customSamlManager");
+    socketTimeoutMillis =
+        Integer.parseInt(config.getValue("sharepoint.webservices.socketTimeoutSecs")) * 1000;
+    readTimeOutMillis =
+        Integer.parseInt(config.getValue("sharepoint.webservices.readTimeOutSecs")) * 1000;
+    sharepointUserAgent = config.getValue("sharepoint.userAgent").trim();
+    String maxRedirectsToFollowStr = config.getValue("connector.maxRedirectsToFollow");
+    performBrowserLeniency =
+        Boolean.parseBoolean(config.getValue("connector.lenientUrlRulesAndCustomRedirect"));
     if (performBrowserLeniency && "".equals(maxRedirectsToFollowStr)) {
       maxRedirectsToFollow = DEFAULT_MAX_REDIRECTS_TO_FOLLOW;
     } else if (performBrowserLeniency) {
       if (!isNumeric(maxRedirectsToFollowStr)) {
-        throw new InvalidConfigurationException("Invalid configuration value "
-            + "for maximum number of url redirects "
-            + "allowed (adaptor.maxRedirectsToFollow).");
+        throw new InvalidConfigurationException(
+            "Invalid configuration value "
+                + "for maximum number of url redirects "
+                + "allowed (connector.maxRedirectsToFollow).");
       } else {
         maxRedirectsToFollow = Integer.parseInt(maxRedirectsToFollowStr);
         if (maxRedirectsToFollow < 0) {
-          throw new InvalidConfigurationException("Invalid configuration value "
-              + "for maximum number of url redirects "
-              + "allowed (adaptor.maxRedirectsToFollow).");
+          throw new InvalidConfigurationException(
+              "Invalid configuration value "
+                  + "for maximum number of url redirects "
+                  + "allowed (connector.maxRedirectsToFollow).");
         }
       }
     } else if (!performBrowserLeniency && !"".equals(maxRedirectsToFollowStr)) {
-      throw new InvalidConfigurationException("Unexpected configuration value "
-          + "for maximum number of url redirects "
-          + "allowed (adaptor.maxRedirectsToFollow), as adaptor is not "
-          + "configured to perform browser leniency "
-          + "(adaptor.lenientUrlRulesAndCustomRedirect).");
+      throw new InvalidConfigurationException(
+          "Unexpected configuration value "
+              + "for maximum number of url redirects "
+              + "allowed (connector.maxRedirectsToFollow), as connector is not "
+              + "configured to perform browser leniency "
+              + "(connector.lenientUrlRulesAndCustomRedirect).");
     } else if (!performBrowserLeniency && "".equals(maxRedirectsToFollowStr)) {
       maxRedirectsToFollow = -1;
     }
-    
+
     String sidLookupHost = config.getValue("sidLookup.host");
     String sidLookupUsername = null;
     String sidLookupPassword = null;
@@ -581,18 +581,18 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       performSidLookup = false;
     } else {
       sidLookupUsername = config.getValue("sidLookup.username");
-      sidLookupPassword = context.getSensitiveValueDecoder().decodeValue(
-          config.getValue("sidLookup.password"));
+      sidLookupPassword = config.getValue("sidLookup.password");
       if ("".equals(sidLookupUsername) || "".equals(sidLookupPassword)) {
-        throw new InvalidConfigurationException("Adaptor is configured to "
-            + "perfom SID based lookup. please specify valid username and "
-            + "password to perform SID lookup");
+        throw new InvalidConfigurationException(
+            "Connector is configured to "
+                + "perfom SID based lookup. please specify valid username and "
+                + "password to perform SID lookup");
       }
       sidLookupPort = Integer.parseInt(config.getValue("sidLookup.port"));
       sidLookupMethod = config.getValue("sidLookup.method");
-      performSidLookup = true;     
+      performSidLookup = true;
     }
-    
+
     log.log(Level.CONFIG, "SharePoint Url: {0}", configuredSharePointUrl);
     log.log(Level.CONFIG, "Username: {0}", username);
     log.log(Level.CONFIG, "Password: {0}", password);
@@ -602,8 +602,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     log.log(Level.CONFIG, "Use Live Authentication: {0}",
         useLiveAuthentication);
     log.log(Level.CONFIG, "Custom SAML provider: {0}", customSamlManager);
-    log.log(Level.CONFIG, "Adaptor user agent: {0}",
-        adaptorUserAgent);
+    log.log(Level.CONFIG, "Connector user agent: {0}", sharepointUserAgent);
     log.log(Level.CONFIG, "Run in Site Collection Only mode: {0}",
         configuredSharePointUrl.isSiteCollectionUrl());
     log.log(Level.CONFIG, "Perform SID Lookup for domain groups: {0}",
@@ -616,18 +615,19 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     }
 
     if (configuredSharePointUrl.isSiteCollectionUrl()) {
-      log.info("Adaptor is configured to use site collection only mode. "
-          + "ACLs and anonymous access settings at web application policy "
-          + "level will be ignored.");
+      log.info(
+          "Connector is configured to use site collection only mode. "
+              + "ACLs and anonymous access settings at web application policy "
+              + "level will be ignored.");
     }
-    
+
     ntlmAuthenticator = new NtlmAuthenticator(username, password);
-    if (!"".equals(username) && !"".equals(password)) {      
+    if (!"".equals(username) && !"".equals(password)) {
       // Unfortunately, this is a JVM-wide modification.
       Authenticator.setDefault(ntlmAuthenticator);
       needToResetDefaultAuthenticator = true;
     }
-    
+
     URL virtualServerUrl =
         new URL(configuredSharePointUrl.getVirtualServerUrl());
     ntlmAuthenticator.addPermitForHost(virtualServerUrl);
@@ -639,53 +639,55 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       // it will be consumed by third party code. Also config object is
       // not immutable and there is a risk of possible alteration to values
       // from third party code.
-      // TODO : Add helper method to config object to get map of configuration 
+      // TODO : Add helper method to config object to get map of configuration
       // values. Current helper method doesn't return decoded values.
-      Map<String, String> adaptorConfig = new HashMap<String, String>();
-      for(String configKey : config.getAllKeys()) {
-        // Decoding each config value as there is no information about which 
-        // config values are sensitive and need decoding.
-        adaptorConfig.put(configKey, context.getSensitiveValueDecoder()
-            .decodeValue(config.getValue(configKey)));
-      }
-      SamlHandshakeManager manager = authenticationClientFactory
-          .newCustomSamlAuthentication(customSamlManager, adaptorConfig);          
-      authenticationHandler = new SamlAuthenticationHandler.Builder(username,
-          password, scheduledExecutor, manager).build();      
+      Map<String, String> connectorConfig =
+          Collections.unmodifiableMap(
+              config.getConfigByPrefix(config.getValue("customSamlManager.configPrefix")));
+      SamlHandshakeManager manager =
+          authenticationClientFactory.newCustomSamlAuthentication(
+              customSamlManager, connectorConfig);
+      authenticationHandler =
+          new SamlAuthenticationHandler.Builder(username, password, scheduledExecutor, manager)
+              .build();
     } else if (useLiveAuthentication)  {
       if ("".equals(username) || "".equals(password)) {
-        throw new InvalidConfigurationException("Adaptor is configured to "
-            + "use Live authentication. Please specify valid username "
-            + "and password.");
+        throw new InvalidConfigurationException(
+            "Connector is configured to "
+                + "use Live authentication. Please specify valid username "
+                + "and password.");
       }
       SamlHandshakeManager manager = authenticationClientFactory
           .newLiveAuthentication(configuredSharePointUrl.getVirtualServerUrl(),
               username, password);
-      authenticationHandler = new SamlAuthenticationHandler.Builder(username,
-          password, scheduledExecutor, manager).build();     
+      authenticationHandler =
+          new SamlAuthenticationHandler.Builder(username, password, scheduledExecutor, manager)
+              .build();
       authenticationType = "Live";
     } else if (!"".equals(stsendpoint) && !"".equals(stsrealm)) {
       if ("".equals(username) || "".equals(password)) {
-        throw new InvalidConfigurationException("Adaptor is configured to "
-            + "use ADFS authentication. Please specify valid username "
-            + "and password.");
+        throw new InvalidConfigurationException(
+            "Connector is configured to "
+                + "use ADFS authentication. Please specify valid username "
+                + "and password.");
       }
       SamlHandshakeManager manager = authenticationClientFactory
           .newAdfsAuthentication(configuredSharePointUrl.getSharePointUrl(),
               username, password, stsendpoint, stsrealm,
               config.getValue("sharepoint.sts.login"),
               config.getValue("sharepoint.sts.trustLocation"));
-      authenticationHandler = new SamlAuthenticationHandler.Builder(username,
-          password, scheduledExecutor, manager).build();            
+      authenticationHandler =
+          new SamlAuthenticationHandler.Builder(username, password, scheduledExecutor, manager)
+              .build();
       authenticationType = "ADFS";
-    } else {    
+    } else {
       AuthenticationSoap authenticationSoap = authenticationClientFactory
           .newSharePointFormsAuthentication(
               configuredSharePointUrl.getSharePointUrl(), username, password);
-      if (!"".equals(adaptorUserAgent)) {
+      if (!"".equals(sharepointUserAgent)) {
         ((BindingProvider) authenticationSoap).getRequestContext().put(
             MessageContext.HTTP_REQUEST_HEADERS, Collections.singletonMap(
-                "User-Agent", Collections.singletonList(adaptorUserAgent)));
+                "User-Agent", Collections.singletonList(sharepointUserAgent)));
       }
       addSocketTimeoutConfiguration((BindingProvider) authenticationSoap);
       authenticationHandler = new SharePointFormsAuthenticationHandler
@@ -693,55 +695,66 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           .build();
       authenticationType = "SharePoint";
     }
-    
+
     try {
       log.log(Level.INFO, "Using {0} authentication.", authenticationType);
-      authenticationHandler.start();      
+      authenticationHandler.start();
     } catch (WebServiceException ex) {
       if (ex.getCause() instanceof UnknownHostException) {
         // This may be due to  DNS issue or transiant network error.
-        // Just rethrow excption and allow adaptor to retry.
-        throw new IOException(String.format(
-            "Cannot find SharePoint server \"%s\" -- please make sure it is "
-                + "specified properly.",
-                configuredSharePointUrl.getSharePointUrl()), ex);
+        // Just rethrow excption and allow connector to retry.
+        throw new IOException(
+            String.format(
+                "Cannot find SharePoint server \"%s\" -- please make sure it is "
+                    + "specified properly.",
+                configuredSharePointUrl.getSharePointUrl()),
+            ex);
       }
-      if (ex.getCause() instanceof ConnectException 
-          || ex.getCause() instanceof SocketTimeoutException ) {
-        // SharePoint might be down. Just rethrow exception and allow adaptor to
-        // retry. We get ConnectException when IIS / web site is down and 
+      if (ex.getCause() instanceof ConnectException
+          || ex.getCause() instanceof SocketTimeoutException) {
+        // SharePoint might be down. Just rethrow exception and allow connector to
+        // retry. We get ConnectException when IIS / web site is down and
         // SocketTimeOutException when SharePoint server does not respond in
-        // timely manner. 
-        throw new IOException(String.format(
-            "Unable to connect to SharePoint server \"%s\" -- please make "
-                + "sure it is specified properly and is available.",
-                configuredSharePointUrl.getSharePointUrl()), ex);
+        // timely manner.
+        throw new IOException(
+            String.format(
+                "Unable to connect to SharePoint server \"%s\" -- please make "
+                    + "sure it is specified properly and is available.",
+                configuredSharePointUrl.getSharePointUrl()),
+            ex);
       }
-      String adfsWarning = "ADFS".equals(authenticationType) 
-          ? " Also verify if stsendpoint and stsrealm is specified correctly "
-          + "and ADFS environment is available." : "";
-      String warning = String.format(
-          "Failed to initialize adaptor using %s authentication."
-          + " Please verify adaptor configuration for SharePoint url,"
-          + " username and password.%s", authenticationType, adfsWarning);
+      String adfsWarning =
+          "ADFS".equals(authenticationType)
+              ? " Also verify if stsendpoint and stsrealm is specified correctly "
+                  + "and ADFS environment is available."
+              : "";
+      String warning =
+          String.format(
+              "Failed to initialize connector using %s authentication."
+                  + " Please verify connector configuration for SharePoint url,"
+                  + " username and password.%s",
+              authenticationType, adfsWarning);
       throw new IOException(warning, ex);
     }
-   
+
     try {
       executor = executorFactory.call();
-      SiteAdaptor spAdaptor = getSiteAdaptor(
-          configuredSharePointUrl.getSharePointUrl(),
-          configuredSharePointUrl.getSharePointUrl());
-      SiteDataClient sharePointSiteDataClient =
-          spAdaptor.getSiteDataClient();
-      rareModCache
-          = new RareModificationCache(sharePointSiteDataClient, executor);
+      SiteConnector spConnector =
+          getSiteConnector(
+              configuredSharePointUrl.getSharePointUrl(),
+              configuredSharePointUrl.getSharePointUrl());
+      SiteDataClient sharePointSiteDataClient = spConnector.getSiteDataClient();
+      rareModCache = new RareModificationCache(sharePointSiteDataClient, executor);
       if (performSidLookup) {
-      adClient = adClientFactory.newActiveDirectoryClient(
-              sidLookupHost,sidLookupPort, sidLookupUsername,
-              sidLookupPassword,sidLookupMethod);     
+        adClient =
+            adClientFactory.newActiveDirectoryClient(
+                sidLookupHost,
+                sidLookupPort,
+                sidLookupUsername,
+                sidLookupPassword,
+                sidLookupMethod);
       }
-      
+
       if (!configuredSharePointUrl.isSiteCollectionUrl()) {
         sharePointUrl = configuredSharePointUrl;
       } else {
@@ -756,7 +769,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           SPSite.Site sc = spSite.getSite();
           if (sc != null && sc.getMetadata() != null) {
             siteCollectionUrl = spSite.getSite().getMetadata().getURL();
-          }      
+          }
         }
         if(Strings.isNullOrEmpty(siteCollectionUrl)){
           log.log(Level.WARNING, "Unable to get exact url for site "
@@ -771,8 +784,8 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       // Test out configuration.
       VirtualServer vs = sharePointSiteDataClient.getContentVirtualServer();
 
-      // Check Full Read permission for Adaptor User on SharePoint
-      checkFullReadPermissionForAdaptorUser(vs, username);
+      // Check Full Read permission for Connector User on SharePoint
+      checkFullReadPermissionForConnectorUser(vs, username);
 
       String version = vs.getMetadata().getVersion();
       log.log(Level.INFO, "SharePoint Version : {0}", version);
@@ -780,27 +793,24 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       // Version for SP2010 is 14. Version for SP2013 is 15.
       isSp2007 = (version == null);
       log.log(Level.FINE, "isSP2007 : {0}", isSp2007);
-      
+
       boolean urlAvailableInAlternateAccessMapping = false;
       // Loop through all host-named site collections and add them to
       // whitelist for authenticator.
-      for (ContentDatabases.ContentDatabase cdcd : 
-          vs.getContentDatabases().getContentDatabase()) {
+      for (ContentDatabases.ContentDatabase cdcd : vs.getContentDatabases().getContentDatabase()) {
         ContentDatabase cd;
         try {
           cd = sharePointSiteDataClient.getContentContentDatabase(
               cdcd.getID(), true);
         } catch (IOException ex) {
-          log.log(Level.WARNING, "Failed to get sites for database: " 
-              + cdcd.getID(), ex);
+          log.log(Level.WARNING, "Failed to get sites for database: " + cdcd.getID(), ex);
           continue;
         }
         if (cd.getSites() == null) {
           continue;
         }
         for (Sites.Site siteListing : cd.getSites().getSite()) {
-          String siteString
-              = spAdaptor.encodeDocId(siteListing.getURL()).getUniqueId();
+          String siteString = spConnector.encodeDocId(siteListing.getURL());
           if (sharePointUrl.getVirtualServerUrl()
               .equalsIgnoreCase(siteString)) {
             urlAvailableInAlternateAccessMapping = true;
@@ -809,13 +819,15 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         }
       }
       if (!urlAvailableInAlternateAccessMapping) {
-        log.log(Level.WARNING, "Virtual Server URL {0} is not availble in "
-            + "SharePoint Alternate Access Mapping as Public URL. "
-            + "Due to this mismatch some of the adaptor functionality might "
-            + "not work as expected. Also include / exclude patterns "
-            + "configured on GSA as per Virtual server URL might not "
-            + "work as expected. Please make sure that adaptor is configured "
-            + "to use Public URL instead on internal URL.",
+        log.log(
+            Level.WARNING,
+            "Virtual Server URL {0} is not availble in "
+                + "SharePoint Alternate Access Mapping as Public URL. "
+                + "Due to this mismatch some of the connector functionality might "
+                + "not work as expected. Also include / exclude patterns "
+                + "configured on GSA as per Virtual server URL might not "
+                + "work as expected. Please make sure that connector is configured "
+                + "to use Public URL instead on internal URL.",
             configuredSharePointUrl.getVirtualServerUrl());
       }
     } catch (WebServiceIOException ex) {
@@ -854,45 +866,51 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   @Override
   public void destroy() {
     shutdownExecutor(executor);
-    shutdownExecutor(scheduledExecutor);    
+    shutdownExecutor(scheduledExecutor);
     executor = null;
     scheduledExecutor = null;
     rareModCache = null;
     if (needToResetDefaultAuthenticator) {
       // Reset authenticator
-      Authenticator.setDefault(null);     
+      Authenticator.setDefault(null);
     }
     ntlmAuthenticator = null;
   }
   /**
-   * Method to check full read permission for adaptor user on SharePoint.
-   * Returns -1 if adaptor user is not available in web application policy.
-   * Returns 0 if adaptor user is having other than Full Read permission
-   * Returns 1 if adaptor user is having exact Full Read permission.
+   * Method to check full read permission for connector user on SharePoint. Returns -1 if connector
+   * user is not available in web application policy. Returns 0 if connector user is having other
+   * than Full Read permission Returns 1 if connector user is having exact Full Read permission.
    */
-  @VisibleForTesting  
-  static int checkFullReadPermissionForAdaptorUser(VirtualServer vs,
-      String username) {
-    String adaptorUser = getAdaptorUser(username);
-    if (adaptorUser == null) {
-      log.log(Level.WARNING, "Unable to get adaptor user name");
+  @VisibleForTesting
+  static int checkFullReadPermissionForConnectorUser(VirtualServer vs, String username) {
+    String connectorUser = getConnectorUser(username);
+    if (connectorUser == null) {
+      log.log(Level.WARNING, "Unable to get connector user name");
       return -1;
     }
-    PolicyUser p = getPolicyUserForAdatorUser(vs, adaptorUser);
+    PolicyUser p = getPolicyUserForAdatorUser(vs, connectorUser);
     if (p == null) {
-      log.log(Level.INFO, "Adaptor user [{0}] not available in web "
-          + "application policy to verify permissions.", adaptorUser);
+      log.log(
+          Level.INFO,
+          "Connector user [{0}] not available in web "
+              + "application policy to verify permissions.",
+          connectorUser);
       return -1;
     }
     if (isOtherThanFullReadForPolicyUser( p.getGrantMask().longValue())) {
-      log.log(Level.WARNING, "Adaptor user [{0}] is not having exact full "
-          + "read permission on SharePoint. Having excess or lesser "
-          + "permissions on SharePoint for adaptor user might affect adaptor "
-          + "functionality.", adaptorUser);
-      return 0;      
+      log.log(
+          Level.WARNING,
+          "Connector user [{0}] is not having exact full "
+              + "read permission on SharePoint. Having excess or lesser "
+              + "permissions on SharePoint for connector user might affect connector "
+              + "functionality.",
+          connectorUser);
+      return 0;
     } else {
-      log.log(Level.FINE, "Adaptor user [{0}] is having full read "
-          + "permissions on SharePoint.", adaptorUser);
+      log.log(
+          Level.FINE,
+          "Connector user [{0}] is having full read " + "permissions on SharePoint.",
+          connectorUser);
       return 1;
     }
   }
@@ -903,9 +921,8 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     }
     return null != Ints.tryParse(input);
   }
-  private static PolicyUser getPolicyUserForAdatorUser(VirtualServer vs,
-      String adaptorUser) {
-    if (adaptorUser == null) {
+  private static PolicyUser getPolicyUserForAdatorUser(VirtualServer vs, String connectorUser) {
+    if (connectorUser == null) {
       return null;
     }
     for(PolicyUser p : vs.getPolicies().getPolicyUser()) {
@@ -917,7 +934,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       }
       // parse out authentication provider for forms authenticated user
       policyUser = policyUser.substring(policyUser.indexOf(":") + 1);
-      if (adaptorUser.equalsIgnoreCase(policyUser)) {
+      if (connectorUser.equalsIgnoreCase(policyUser)) {
         return p;
       }
     }
@@ -929,18 +946,17 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   }
 
   @VisibleForTesting
-  static String getAdaptorUser(String username) {
+  static String getConnectorUser(String username) {
     if (!"".equals(username)) {
       return username;
     }
 
-    // USERNAME and USERDOMAIN environment variables are applicable for 
-    // Windows only. On non windows adaptor machine user name will 
+    // USERNAME and USERDOMAIN environment variables are applicable for
+    // Windows only. On non windows connector machine user name will
     // not be empty.
     // Using Ssytem.getenv instead on System.getProperty("user.name") because
     // System.getProperty("user.name") returns username without domain.
-    if (System.getenv("USERDOMAIN") == null 
-        || System.getenv("USERNAME") == null) {
+    if (System.getenv("USERDOMAIN") == null || System.getenv("USERNAME") == null) {
       return null;
     }
     return  System.getenv("USERDOMAIN") + "\\" + System.getenv("USERNAME");
@@ -960,135 +976,128 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   }
 
   @Override
-  public void getDocContent(Request request, Response response)
-      throws IOException {
+  public void process(QueueEntry entry) throws IOException {
     long startMillis = System.currentTimeMillis();
-    log.entering("SharePointAdaptor", "getDocContent",
-        new Object[] {request, response});
-    DocId id = request.getDocId();    
-    SiteAdaptor adptorForDocId = getAdaptorForDocId(id);
-    if (adptorForDocId == null) {
-      log.log(Level.FINE,
-          "responding not found as site adptor for {0} is null", id);
-      response.respondNotFound();
-      log.exiting("SharePointAdaptor", "getDocContent");
+    log.entering("SharePointConnector", "process", entry);
+    SiteConnector connectorForDocId = getConnectorForDocId(entry);
+    if (connectorForDocId == null) {
+      log.log(Level.FINE, "responding not found as site adptor for {0} is null", entry);
+
+      indexingService.deleteItem(entry.getId());
+      log.exiting("SharePointConnector", "process");
       return;
     }
-    
-    if (id.equals(virtualServerDocId)) {
-      adptorForDocId.getVirtualServerDocContent(request, response);
+
+    if (entry.getId().equals(VIRTUAL_SERVER_ID)) {
+      connectorForDocId.getVirtualServerDocContent();
     } else {
-      adptorForDocId.getDocContent(request, response); 
-    }   
-    log.log(Level.FINE, "Duration: getDocContent {0} : {1,number,#} ms",
-        new Object[] {request.getDocId(),
-        System.currentTimeMillis() - startMillis});
-    log.exiting("SharePointAdaptor", "getDocContent");
+      connectorForDocId.getDocContent(entry);
+    }
+    log.log(
+        Level.FINE,
+        "Duration: getDocContent {0} : {1,number,#} ms",
+        new Object[] {entry.getId(), System.currentTimeMillis() - startMillis});
+    log.exiting("SharePointConnector", "process");
   }
 
   @Override
-  public void getDocIds(DocIdPusher pusher) throws InterruptedException,
-      IOException {
-    log.entering("SharePointAdaptor", "getDocIds", pusher);
+  public void traverse() throws InterruptedException, IOException {
+    log.entering("SharePointConnector", "traverse");
     if (sharePointUrl.isSiteCollectionUrl()) {
-      getDocIdsSiteCollectionOnly(pusher);
+      getDocIdsSiteCollectionOnly();
     } else {
-      getDocIdsVirtualServer(pusher);
-    } 
-    log.exiting("SharePointAdaptor", "getDocIds");
+      getDocIdsVirtualServer();
+    }
+    log.exiting("SharePointConnector", "traverse");
   }
-  
-  private void getDocIdsSiteCollectionOnly(DocIdPusher pusher)
-      throws InterruptedException,IOException {
-    log.entering("SharePointAdaptor", "getDocIdsSiteCollectionOnly", pusher);
-    SiteAdaptor scAdaptor = getSiteAdaptor(sharePointUrl.getSharePointUrl(), 
-        sharePointUrl.getSharePointUrl());
-    SiteDataClient scClient = scAdaptor.getSiteDataClient();
+
+  private void getDocIdsSiteCollectionOnly() throws IOException {
+    log.entering("SharePointConnector", "getDocIdsSiteCollectionOnly");
+    SiteConnector scConnector =
+        getSiteConnector(sharePointUrl.getSharePointUrl(), sharePointUrl.getSharePointUrl());
+    SiteDataClient scClient = scConnector.getSiteDataClient();
     Site site = scClient.getContentSite();
     String siteCollectionUrl = getCanonicalUrl(site.getMetadata().getURL());
     // Reset site collection URL instance to use correct URL.
-    scAdaptor = getSiteAdaptor(siteCollectionUrl, siteCollectionUrl);
-    DocId siteCollectionDocId = scAdaptor.encodeDocId(siteCollectionUrl);
-    pusher.pushDocIds(Arrays.asList(siteCollectionDocId));
-    Map<GroupPrincipal, Collection<Principal>> groupDefs 
-        = new HashMap<GroupPrincipal, Collection<Principal>>();
-    groupDefs.putAll(scAdaptor.computeMembersForGroups(site.getGroups()));
-    pusher.pushGroupDefinitions(groupDefs, false);
-    log.exiting("SharePointAdaptor", "getDocIdsSiteCollectionOnly");
+    scConnector = getSiteConnector(siteCollectionUrl, siteCollectionUrl);
+    String siteCollectionDocId = scConnector.encodeDocId(siteCollectionUrl);
+    List<PushEntry> entries = Arrays.asList(new PushEntry().setId(siteCollectionDocId));
+    indexingService.push(entries);
+    Map<ExternalGroup, Collection<Principal>> groupDefs =
+        new HashMap<ExternalGroup, Collection<Principal>>();
+    groupDefs.putAll(scConnector.computeMembersForGroups(site.getGroups()));
+    for (ExternalGroup group : groupDefs.keySet()) {
+      indexingService.updateExternalGroup(group);
+    }
+    log.exiting("SharePointConnector", "getDocIdsSiteCollectionOnly");
   }
-  
-  private void getDocIdsVirtualServer(DocIdPusher pusher)
-      throws InterruptedException,IOException {
-    log.entering("SharePointAdaptor", "getDocIdsVirtualServer", pusher);
-    SiteAdaptor vsAdaptor = getSiteAdaptor(sharePointUrl.getVirtualServerUrl(),
-        sharePointUrl.getVirtualServerUrl());
-    SiteDataClient vsClient = vsAdaptor.getSiteDataClient();
-    pusher.pushDocIds(Arrays.asList(virtualServerDocId));
+
+  private void getDocIdsVirtualServer() throws IOException {
+    log.entering("SharePointConnector", "getDocIdsVirtualServer");
+    SiteConnector vsConnector =
+        getSiteConnector(sharePointUrl.getVirtualServerUrl(), sharePointUrl.getVirtualServerUrl());
+    SiteDataClient vsClient = vsConnector.getSiteDataClient();
+    List<PushEntry> entries = Arrays.asList(new PushEntry().setId(VIRTUAL_SERVER_ID));
+    indexingService.push(entries);
     VirtualServer vs = vsClient.getContentVirtualServer();
-    Map<GroupPrincipal, Collection<Principal>> defs
-        = new HashMap<GroupPrincipal, Collection<Principal>>();
+    Map<ExternalGroup, Collection<Principal>> defs =
+        new HashMap<ExternalGroup, Collection<Principal>>();
     for (ContentDatabases.ContentDatabase cdcd
         : vs.getContentDatabases().getContentDatabase()) {
       ContentDatabase cd;
       try {
         cd = vsClient.getContentContentDatabase(cdcd.getID(), true);
       } catch (IOException ex) {
-        log.log(Level.WARNING, "Failed to get content database: " 
-            + cdcd.getID(), ex);
+        log.log(Level.WARNING, "Failed to get content database: " + cdcd.getID(), ex);
         continue;
       }
       if (cd.getSites() == null) {
         continue;
       }
       for (Sites.Site siteListing : cd.getSites().getSite()) {
-        String siteString
-            = vsAdaptor.encodeDocId(siteListing.getURL()).getUniqueId();
+        String siteString = vsConnector.encodeDocId(siteListing.getURL());
         siteString = getCanonicalUrl(siteString);
-        ntlmAuthenticator.addPermitForHost(spUrlToUri(siteString).toURL());           
-        SiteAdaptor siteAdaptor = getSiteAdaptor(siteString, siteString);
+        ntlmAuthenticator.addPermitForHost(spUrlToUri(siteString).toURL());
+        SiteConnector siteConnector = getSiteConnector(siteString, siteString);
         Site site;
         try {
-          site = siteAdaptor.getSiteDataClient().getContentSite();
+          site = siteConnector.getSiteDataClient().getContentSite();
         } catch (IOException ex) {
           log.log(Level.WARNING, "Failed to get local groups for site: "
               + siteString, ex);
           continue;
         }
-        Map<GroupPrincipal, Collection<Principal>> siteDefs
-            = siteAdaptor.computeMembersForGroups(site.getGroups());
-        for (Map.Entry<GroupPrincipal, Collection<Principal>> me
-            : siteDefs.entrySet()) {
+        Map<ExternalGroup, Collection<Principal>> siteDefs =
+            siteConnector.computeMembersForGroups(site.getGroups());
+        for (Map.Entry<ExternalGroup, Collection<Principal>> me : siteDefs.entrySet()) {
           defs.put(me.getKey(), me.getValue());
-          if (defs.size() >= feedMaxUrls) {
-            pusher.pushGroupDefinitions(defs, false);
-            defs.clear();
-          }
         }
       }
     }
-    pusher.pushGroupDefinitions(defs, false);
-    log.exiting("SharePointAdaptor", "getDocIdsVirtualServer");
+    for (ExternalGroup group : defs.keySet()) {
+      indexingService.updateExternalGroup(group);
+    }
+    log.exiting("SharePointConnector", "getDocIdsVirtualServer");
   }
 
   @Override
-  public void getModifiedDocIds(DocIdPusher pusher)
-      throws InterruptedException {
-    log.entering("SharePointAdaptor", "getModifiedDocIds", pusher);
+  public void handleIncrementalChanges() throws InterruptedException, IOException {
+    log.entering("SharePointConnector", "getModifiedDocIds");
     if (sharePointUrl.isSiteCollectionUrl()) {
-      getModifiedDocIdsSiteCollection(pusher);
+      getModifiedDocIdsSiteCollection();
     } else {
-      getModifiedDocIdsVirtualServer(pusher);
-    }    
-    log.exiting("SharePointAdaptor", "getModifiedDocIds", pusher);
+      getModifiedDocIdsVirtualServer();
+    }
+    log.exiting("SharePointConnector", "getModifiedDocIds");
   }
-  
-  private void getModifiedDocIdsVirtualServer(DocIdPusher pusher)
-      throws InterruptedException {
-    log.entering("SharePointAdaptor", "getModifiedDocIdsVirtualServer", pusher);
-    SiteAdaptor siteAdaptor;
+
+  private void getModifiedDocIdsVirtualServer() throws IOException {
+    log.entering("SharePointConnector", "getModifiedDocIdsVirtualServer");
+    SiteConnector siteConnector;
     try {
-      siteAdaptor = getSiteAdaptor(sharePointUrl.getVirtualServerUrl(),
-          sharePointUrl.getVirtualServerUrl());
+      siteConnector =
+          getSiteConnector(
+              sharePointUrl.getVirtualServerUrl(), sharePointUrl.getVirtualServerUrl());
     } catch (IOException ex) {
       // The call should never fail, and it is the only IOException-throwing
       // call that we can't recover from. Handling it this way allows us to
@@ -1096,7 +1105,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       // exception gracefully throughout this method.
       throw new RuntimeException(ex);
     }
-    SiteDataClient client = siteAdaptor.getSiteDataClient();
+    SiteDataClient client = siteConnector.getSiteDataClient();
     VirtualServer vs = null;
     try {
       vs = client.getContentVirtualServer();
@@ -1107,8 +1116,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     Set<String> discoveredContentDatabases;
     if (vs == null) {
       // Retrieving list of databases failed, but we can continue without it.
-      discoveredContentDatabases
-        = new HashSet<String>(objectGuidToChangeIdMapping.keySet());
+      discoveredContentDatabases = new HashSet<String>(objectGuidToChangeIdMapping.keySet());
     } else {
       discoveredContentDatabases = new HashSet<String>();
       if (vs.getContentDatabases() != null) {
@@ -1118,24 +1126,19 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         }
       }
     }
-    Set<String> knownContentDatabases
-        = new HashSet<String>(objectGuidToChangeIdMapping.keySet());
-    Set<String> removedContentDatabases
-        = new HashSet<String>(knownContentDatabases);
+    List<PushEntry> pushEntries = new ArrayList<>();
+    Set<String> knownContentDatabases = new HashSet<String>(objectGuidToChangeIdMapping.keySet());
+    Set<String> removedContentDatabases = new HashSet<String>(knownContentDatabases);
     removedContentDatabases.removeAll(discoveredContentDatabases);
-    Set<String> newContentDatabases
-        = new HashSet<String>(discoveredContentDatabases);
+    Set<String> newContentDatabases = new HashSet<String>(discoveredContentDatabases);
     newContentDatabases.removeAll(knownContentDatabases);
-    Set<String> updatedContentDatabases
-        = new HashSet<String>(knownContentDatabases);
+    Set<String> updatedContentDatabases = new HashSet<String>(knownContentDatabases);
     updatedContentDatabases.retainAll(discoveredContentDatabases);
     if (!removedContentDatabases.isEmpty()
         || !newContentDatabases.isEmpty()) {
-      DocIdPusher.Record record
-          = new DocIdPusher.Record.Builder(virtualServerDocId)
-          .setCrawlImmediately(true).build();
-      pusher.pushRecords(Collections.singleton(record));
+      pushEntries.add(new PushEntry().setId(VIRTUAL_SERVER_ID).setKind("modified"));
     }
+    indexingService.push(pushEntries);
     for (String contentDatabase : removedContentDatabases) {
       objectGuidToChangeIdMapping.remove(contentDatabase);
     }
@@ -1153,16 +1156,16 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       objectGuidToChangeIdMapping.put(contentDatabase, changeId);
     }
     for (String contentDatabase : updatedContentDatabases) {
+
       String changeId = objectGuidToChangeIdMapping.get(contentDatabase);
       if (changeId == null) {
         // The item was removed from objectGuidToChangeIdMapping, so apparently
         // this database is gone.
         continue;
       }
-      CursorPaginator<SPContentDatabase, String> changesPaginator
-          = client.getChangesContentDatabase(contentDatabase, changeId,
-              isSp2007);
-      Set<DocId> docIds = new HashSet<DocId>();
+      CursorPaginator<SPContentDatabase, String> changesPaginator =
+          client.getChangesContentDatabase(contentDatabase, changeId, isSp2007);
+      List<PushEntry> modifiedEntries = new ArrayList<>();
       Set<String> updatedSiteSecurity = new HashSet<String>();
       try {
         while (true) {
@@ -1171,8 +1174,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
             if (changes == null) {
               break;
             }
-            getModifiedDocIdsContentDatabase(changes, docIds,
-                updatedSiteSecurity);
+            getModifiedDocIdsContentDatabase(changes, modifiedEntries, updatedSiteSecurity);
           } catch (XmlProcessingException ex) {
             log.log(Level.WARNING, "Error parsing changes from content "
                 + "database: " + contentDatabase, ex);
@@ -1188,72 +1190,66 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
             + contentDatabase, ex);
         // Continue processing. Hope that next time works better.
       }
-      pushIncrementalUpdatesAndGroups(
-          pusher, siteAdaptor, docIds, updatedSiteSecurity);
-      
+      pushIncrementalUpdatesAndGroups(siteConnector, modifiedEntries, updatedSiteSecurity);
+
     }
-    log.exiting("SharePointAdaptor", "getModifiedDocIdsVirtualServer", pusher);
+    log.exiting("SharePointConnector", "getModifiedDocIdsVirtualServer");
   }
 
-  private void pushIncrementalUpdatesAndGroups(DocIdPusher pusher, 
-      SiteAdaptor siteAdaptor, Set<DocId> docIds,
-      Set<String> updatedSiteSecurity) throws InterruptedException {
-      List<DocIdPusher.Record> records
-          = new ArrayList<DocIdPusher.Record>(docIds.size());
-      DocIdPusher.Record.Builder builder
-          = new DocIdPusher.Record.Builder(new DocId("to-be-replaced-name"))
-          .setCrawlImmediately(true);
-      for (DocId docId : docIds) {
-        records.add(builder.setDocId(docId).build());
-      }
-      pusher.pushRecords(records);
-      if (updatedSiteSecurity.isEmpty()) {
-        return;
-      }
-      Map<GroupPrincipal, Collection<Principal>> groupDefs
-          = new HashMap<GroupPrincipal, Collection<Principal>>();
-      for (String siteUrl : updatedSiteSecurity) {
-        Site site;
-        try {
-          site = getSiteAdaptor(siteUrl, siteUrl).getSiteDataClient()
-              .getContentSite();
-        } catch (IOException ex) {
-          log.log(Level.WARNING, "Failed to get local groups for site: "
-              + siteUrl, ex);
-          continue;
-        }
-        groupDefs.putAll(siteAdaptor.computeMembersForGroups(site.getGroups()));
-      }
-      pusher.pushGroupDefinitions(groupDefs, false);
-    }
-
-  @VisibleForTesting
-  void getModifiedDocIdsContentDatabase(SPContentDatabase changes,
-      Collection<DocId> docIds,
-      Collection<String> updatedSiteSecurity) throws IOException {
-    log.entering("SharePointAdaptor", "getModifiedDocIdsContentDatabase",
-        new Object[] {changes, docIds});   
-    if (!"Unchanged".equals(changes.getChange())) {
-      docIds.add(virtualServerDocId);
-    }
-    List<SPSite> changedSites = changes.getSPSite();
-    if (changedSites == null) {      
-      log.exiting("SharePointAdaptor", "getModifiedDocIdsContentDatabase");
+  private void pushIncrementalUpdatesAndGroups(
+      SiteConnector siteConnector, List<PushEntry> pushEntries, Set<String> updatedSiteSecurity)
+      throws IOException {
+    indexingService.push(pushEntries);
+    if (updatedSiteSecurity.isEmpty()) {
       return;
     }
-    for (SPSite site : changes.getSPSite()) {       
-      getModifiedDocIdsSite(site, docIds, updatedSiteSecurity);
+    Map<ExternalGroup, Collection<Principal>> groupDefs =
+        new HashMap<ExternalGroup, Collection<Principal>>();
+    for (String siteUrl : updatedSiteSecurity) {
+      Site site;
+      try {
+        site = getSiteConnector(siteUrl, siteUrl).getSiteDataClient().getContentSite();
+      } catch (IOException ex) {
+        log.log(Level.WARNING, "Failed to get local groups for site: " + siteUrl, ex);
+        continue;
+      }
+      groupDefs.putAll(siteConnector.computeMembersForGroups(site.getGroups()));
     }
-    log.exiting("SharePointAdaptor", "getModifiedDocIdsContentDatabase");
+    for (ExternalGroup group : groupDefs.keySet()) {
+      indexingService.updateExternalGroup(group);
+    }
   }
 
   @VisibleForTesting
-  void getModifiedDocIdsSiteCollection(DocIdPusher pusher)
-      throws InterruptedException {
-    SiteAdaptor siteAdaptor;
+  void getModifiedDocIdsContentDatabase(
+      SPContentDatabase changes,
+      List<PushEntry> modifiedEntries,
+      Collection<String> updatedSiteSecurity)
+      throws IOException {
+    log.entering(
+        "SharePointConnector",
+        "getModifiedDocIdsContentDatabase",
+        new Object[] {changes, modifiedEntries});
+    if (!"Unchanged".equals(changes.getChange())) {
+      modifiedEntries.add(new PushEntry().setId(VIRTUAL_SERVER_ID).setKind("modified"));
+    }
+    List<SPSite> changedSites = changes.getSPSite();
+    if (changedSites == null) {
+      log.exiting("SharePointConnector", "getModifiedDocIdsContentDatabase");
+      return;
+    }
+    for (SPSite site : changes.getSPSite()) {
+      getModifiedDocIdsSite(site, modifiedEntries, updatedSiteSecurity);
+    }
+    log.exiting("SharePointConnector", "getModifiedDocIdsContentDatabase");
+  }
+
+  @VisibleForTesting
+  void getModifiedDocIdsSiteCollection() throws IOException {
+    SiteConnector siteConnector;
     try {
-      siteAdaptor = getSiteAdaptor(sharePointUrl.getSharePointUrl(),
-          sharePointUrl.getSharePointUrl());
+      siteConnector =
+          getSiteConnector(sharePointUrl.getSharePointUrl(), sharePointUrl.getSharePointUrl());
     } catch (IOException ex) {
       // The call should never fail, and it is the only IOException-throwing
       // call that we can't recover from. Handling it this way allows us to
@@ -1262,58 +1258,59 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       throw new RuntimeException(ex);
     }
 
-    SiteDataClient client = siteAdaptor.getSiteDataClient();
+    SiteDataClient client = siteConnector.getSiteDataClient();
     Site site;
     try {
       site = client.getContentSite();
     } catch (IOException ex) {
       // If we can't get hold of Site object, we can not proceed with change
-      // detection at Site Collection level. So we gracefully 
+      // detection at Site Collection level. So we gracefully
       // handle IO exception here.
       throw new RuntimeException(ex);
-    }    
-    if (site.getMetadata() == null || site.getMetadata().getID() == null 
+    }
+    if (site.getMetadata() == null
+        || site.getMetadata().getID() == null
         || site.getMetadata().getChangeId() == null) {
-      log.log(Level.WARNING, 
-          "Invalid Site object. Unable to propcess incremental updates.");
+      log.log(Level.WARNING, "Invalid Site object. Unable to propcess incremental updates.");
       return;
     }
     String siteId = site.getMetadata().getID();
     if (!objectGuidToChangeIdMapping.containsKey(siteId)) {
       objectGuidToChangeIdMapping.put(siteId, site.getMetadata().getChangeId());
     }
-    
-    Set<DocId> docIds = new HashSet<DocId>();
+
+    List<PushEntry> modifiedEntries = new ArrayList<>();
     Set<String> updatedSiteSecurity = new HashSet<String>();
     try {
-      CursorPaginator<SPSite, String> changesPaginator 
-          = client.getChangesSPSite(siteId,
-              objectGuidToChangeIdMapping.get(siteId), isSp2007);
+      CursorPaginator<SPSite, String> changesPaginator =
+          client.getChangesSPSite(siteId, objectGuidToChangeIdMapping.get(siteId), isSp2007);
       while(true) {
         SPSite changes = changesPaginator.next();
         if (changes == null) {
           break;
         }
-        getModifiedDocIdsSite(changes, docIds, updatedSiteSecurity);
+        getModifiedDocIdsSite(changes, modifiedEntries, updatedSiteSecurity);
         objectGuidToChangeIdMapping.put(siteId, changesPaginator.getCursor());
       }
     } catch (IOException ex) {
-      log.log(Level.WARNING, "Error getting changes from Site Collection : "
-            + site.getMetadata().getURL(), ex);
-        // Continue processing. Hope that next time works better.
+      log.log(
+          Level.WARNING,
+          "Error getting changes from Site Collection : " + site.getMetadata().getURL(),
+          ex);
+      // Continue processing. Hope that next time works better.
     }
-    pushIncrementalUpdatesAndGroups(
-        pusher, siteAdaptor, docIds, updatedSiteSecurity);
+    pushIncrementalUpdatesAndGroups(siteConnector, modifiedEntries, updatedSiteSecurity);
   }
 
-  private void getModifiedDocIdsSite(SPSite changes, Collection<DocId> docIds,
-      Collection<String> updatedSiteSecurity) throws IOException {
-    log.entering("SharePointAdaptor", "getModifiedDocIdsSite",
-        new Object[] {changes, docIds});
+  private void getModifiedDocIdsSite(
+      SPSite changes, List<PushEntry> modifiedEntries, Collection<String> updatedSiteSecurity)
+      throws IOException {
+    log.entering(
+        "SharePointConnector", "getModifiedDocIdsSite", new Object[] {changes, modifiedEntries});
     if (isModified(changes.getChange())) {
       String siteUrl = changes.getServerUrl() + changes.getDisplayUrl();
       siteUrl = getCanonicalUrl(siteUrl);
-      docIds.add(new DocId(siteUrl));
+      modifiedEntries.add(new PushEntry().setId(siteUrl).setKind("modified"));
       // Add modified site to whitelist for authenticator as this might be new
       // host name site collection.
       ntlmAuthenticator.addPermitForHost(spUrlToUri(siteUrl).toURL());
@@ -1323,103 +1320,102 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     }
     List<SPWeb> changedWebs = changes.getSPWeb();
     if (changedWebs == null) {
-      log.exiting("SharePointAdaptor", "getModifiedDocIdsSite");
+      log.exiting("SharePointConnector", "getModifiedDocIdsSite");
       return;
     }
     for (SPWeb web : changedWebs) {
-      getModifiedDocIdsWeb(web, docIds);
+      getModifiedDocIdsWeb(web, modifiedEntries);
     }
-    log.exiting("SharePointAdaptor", "getModifiedDocIdsSite");
+    log.exiting("SharePointConnector", "getModifiedDocIdsSite");
   }
 
-  private void getModifiedDocIdsWeb(SPWeb changes, Collection<DocId> docIds) {
-    log.entering("SharePointAdaptor", "getModifiedDocIdsWeb",
-        new Object[] {changes, docIds});
+  private void getModifiedDocIdsWeb(SPWeb changes, List<PushEntry> modifiedEntries) {
+    log.entering(
+        "SharePointConnector", "getModifiedDocIdsWeb", new Object[] {changes, modifiedEntries});
     if (isModified(changes.getChange())) {
       String webUrl = changes.getServerUrl() + changes.getDisplayUrl();
       webUrl = getCanonicalUrl(webUrl);
-      docIds.add(new DocId(webUrl));
+      modifiedEntries.add(new PushEntry().setId(webUrl).setKind("modified"));
     }
-    
+
     List<Object> spObjects = changes.getSPFolderOrSPListOrSPFile();
     if (spObjects == null) {
-      log.exiting("SharePointAdaptor", "getModifiedDocIdsWeb");
+      log.exiting("SharePointConnector", "getModifiedDocIdsWeb");
       return;
     }
-    for (Object choice : spObjects) {      
+    for (Object choice : spObjects) {
       if (choice instanceof SPList) {
-        getModifiedDocIdsList((SPList) choice, docIds);
+        getModifiedDocIdsList((SPList) choice, modifiedEntries);
       }
     }
-    log.exiting("SharePointAdaptor", "getModifiedDocIdsWeb");
+    log.exiting("SharePointConnector", "getModifiedDocIdsWeb");
   }
 
-  private void getModifiedDocIdsList(SPList changes,
-      Collection<DocId> docIds) {
-    log.entering("SharePointAdaptor", "getModifiedDocIdsList",
-        new Object[] {changes, docIds});
+  private void getModifiedDocIdsList(SPList changes, List<PushEntry> modifiedEntries) {
+    log.entering(
+        "SharePointConnector", "getModifiedDocIdsList", new Object[] {changes, modifiedEntries});
     if (isModified(changes.getChange())) {
       String listUrl = changes.getServerUrl() + changes.getDisplayUrl();
-      docIds.add(new DocId(listUrl));
+      modifiedEntries.add(new PushEntry().setId(listUrl).setKind("modified"));
     }
     List<Object> spObjects = changes.getSPViewOrSPListItem();
     if (spObjects == null) {
-      log.exiting("SharePointAdaptor", "getModifiedDocIdsList");
+      log.exiting("SharePointConnector", "getModifiedDocIdsList");
       return;
     }
     for (Object choice : spObjects) {
       // Ignore view change detection.
 
       if (choice instanceof SPListItem) {
-        getModifiedDocIdsListItem((SPListItem) choice, docIds);
+        getModifiedDocIdsListItem((SPListItem) choice, modifiedEntries);
       }
     }
-    log.exiting("SharePointAdaptor", "getModifiedDocIdsList");
+    log.exiting("SharePointConnector", "getModifiedDocIdsList");
   }
 
-  private void getModifiedDocIdsListItem(SPListItem changes,
-      Collection<DocId> docIds) {
-    log.entering("SharePointAdaptor", "getModifiedDocIdsListItem",
-        new Object[] {changes, docIds});
+  private void getModifiedDocIdsListItem(SPListItem changes, List<PushEntry> modifiedEntries) {
+    log.entering(
+        "SharePointConnector",
+        "getModifiedDocIdsListItem",
+        new Object[] {changes, modifiedEntries});
     if (isModified(changes.getChange())) {
       SPListItem.ListItem listItem = changes.getListItem();
       if (listItem == null) {
-        log.exiting("SharePointAdaptor", "getModifiedDocIdsListItem");
+        log.exiting("SharePointConnector", "getModifiedDocIdsListItem");
         return;
-      }      
+      }
       Object oData = listItem.getAny();
       if (!(oData instanceof Element)) {
         log.log(Level.WARNING, "Unexpected object type for data: {0}",
             oData.getClass());
       } else {
         Element data = (Element) oData;
-        String serverUrl = data.getAttribute(OWS_SERVERURL_ATTRIBUTE);        
+        String serverUrl = data.getAttribute(OWS_SERVERURL_ATTRIBUTE);
         if (serverUrl == null) {
           log.log(Level.WARNING, "Could not find server url attribute for "
               + "list item {0}", changes.getId());
         } else {
           String url = changes.getServerUrl() + serverUrl;
-          docIds.add(new DocId(url));
+          modifiedEntries.add(new PushEntry().setId(url).setKind("modified"));
         }
       }
     }
-    log.exiting("SharePointAdaptor", "getModifiedDocIdsListItem");
+    log.exiting("SharePointConnector", "getModifiedDocIdsListItem");
   }
 
   private boolean isModified(String change) {
     return !"Unchanged".equals(change) && !"Delete".equals(change);
   }
 
-  private SiteAdaptor getSiteAdaptor(String site, String web)
-      throws IOException {
+  private SiteConnector getSiteConnector(String site, String web) throws IOException {
     web = getCanonicalUrl(web);
-    SiteAdaptor siteAdaptor = siteAdaptors.get(web);
-    if (siteAdaptor == null) {
+    SiteConnector siteConnector = siteConnectors.get(web);
+    if (siteConnector == null) {
       site = getCanonicalUrl(site);
       ntlmAuthenticator.addPermitForHost(new URL(web));
       String endpoint = spUrlToUri(web + "/_vti_bin/SiteData.asmx").toString();
       SiteDataSoap siteDataSoap = soapFactory.newSiteData(endpoint);
-      
+
       String endpointUserGroup = spUrlToUri(site + "/_vti_bin/UserGroup.asmx")
           .toString();
       UserGroupSoap userGroupSoap = soapFactory.newUserGroup(endpointUserGroup);
@@ -1435,39 +1431,44 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       addSocketTimeoutConfiguration((BindingProvider) userGroupSoap);
       addSocketTimeoutConfiguration((BindingProvider) peopleSoap);
 
-      siteAdaptor = new SiteAdaptor(site, web, siteDataSoap, userGroupSoap,
-          peopleSoap, new MemberIdMappingCallable(site),
-          new SiteUserIdMappingCallable(site));
-      siteAdaptors.putIfAbsent(web, siteAdaptor);
-      siteAdaptor = siteAdaptors.get(web);
+      siteConnector =
+          new SiteConnector(
+              site,
+              web,
+              siteDataSoap,
+              userGroupSoap,
+              peopleSoap,
+              new MemberIdMappingCallable(site),
+              new SiteUserIdMappingCallable(site));
+      siteConnectors.putIfAbsent(web, siteConnector);
+      siteConnector = siteConnectors.get(web);
     }
-    return siteAdaptor;
+    return siteConnector;
   }
-  
+
   private void addRequestHeaders(BindingProvider port) {
     Map<String, List<String>> headers = new HashMap<String, List<String>>();
     // Add forms authentication cookies or disable forms authentication
     if (authenticationHandler.getAuthenticationCookies().isEmpty()) {
-      // To access a SharePoint site that uses multiple authentication 
+      // To access a SharePoint site that uses multiple authentication
       // providers by using a set of Windows credentials, need to add
-      // "X-FORMS_BASED_AUTH_ACCEPTED" request header to web service request 
+      // "X-FORMS_BASED_AUTH_ACCEPTED" request header to web service request
       // and set its value to "f"
       // http://msdn.microsoft.com/en-us/library/hh124553(v=office.14).aspx
-      headers.put("X-FORMS_BASED_AUTH_ACCEPTED",
-          Collections.singletonList("f"));
+      headers.put("X-FORMS_BASED_AUTH_ACCEPTED", Collections.singletonList("f"));
     } else {
-      headers.put("Cookie", authenticationHandler.getAuthenticationCookies()); 
+      headers.put("Cookie", authenticationHandler.getAuthenticationCookies());
     }
-    
+
     // Set User-Agent value
-    if (!"".equals(adaptorUserAgent)) {
-      headers.put("User-Agent", Collections.singletonList(adaptorUserAgent));
+    if (!"".equals(sharepointUserAgent)) {
+      headers.put("User-Agent", Collections.singletonList(sharepointUserAgent));
     }
-    
+
     // Set request headers
-    port.getRequestContext().put(MessageContext.HTTP_REQUEST_HEADERS, headers);    
+    port.getRequestContext().put(MessageContext.HTTP_REQUEST_HEADERS, headers);
   }
-  
+
   private void addSocketTimeoutConfiguration(BindingProvider port) {
     port.getRequestContext().put("com.sun.xml.internal.ws.connect.timeout",
         socketTimeoutMillis);
@@ -1477,7 +1478,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         socketTimeoutMillis);
     port.getRequestContext().put("com.sun.xml.ws.request.timeout",
         readTimeOutMillis);
-  }  
+  }
 
   static URI spUrlToUri(String url) throws IOException {
     // Because SP is silly, the path of the URI is unencoded, but the rest of
@@ -1503,7 +1504,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     }
     return hostUri.resolve(pathUri);
   }
-  
+
   /**
    * Encode input url by
    *   1. Handle unicode in URL by converting to ASCII string.
@@ -1514,7 +1515,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   static URL encodeSharePointUrl(String url, boolean performBrowserLeniency)
       throws IOException {
     if (!performBrowserLeniency) {
-      // If no need to perform browser leniency, just return properly escaped 
+      // If no need to perform browser leniency, just return properly escaped
       // string using toASCIIString() to handle unicode.
       return new URL(spUrlToUri(url).toASCIIString());
     }
@@ -1526,12 +1527,11 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     URI queryUri;
     try {
       // Special handling for path when path is empty. e.g. for URL
-      // http://sharepoint.example.com?ID=1 generates 400 bad request 
+      // http://sharepoint.example.com?ID=1 generates 400 bad request
       // in Java code but in browser it works fine.
       // Following code block will generate URL as
       // http://sharepoint.example.com/?ID=1 which works fine in Java code.
-      String path 
-          = "".equals(encodedUri.getPath()) ? "/" : encodedUri.getPath();
+      String path = "".equals(encodedUri.getPath()) ? "/" : encodedUri.getPath();
       // Create new URI with query parameters
       queryUri = new URI(encodedUri.getScheme(), encodedUri.getAuthority(),
           path, urlParts[1], encodedUri.getFragment());
@@ -1540,7 +1540,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       throw new IOException(ex);
     }
   }
-  
+
   // Remove trailing slash from URLs as SharePoint doesn't like trailing slash
   // in SiteData.GetUrlSegments
   static String getCanonicalUrl(String url) {
@@ -1567,52 +1567,57 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     return sb.toString();
   }
 
-  public static void main(String[] args) {
-    AbstractAdaptor.main(new SharePointConnector(), args);
+  public static void main(String[] args) throws IOException, InterruptedException {
+    Application.main(new SharePointConnector(), args);
   }
 
-  private SiteAdaptor getAdaptorForDocId(DocId docId) throws IOException {
-    if (virtualServerDocId.equals(docId)) {
+  private SiteConnector getConnectorForDocId(QueueEntry entry) throws IOException {
+    if (VIRTUAL_SERVER_ID.equals(entry.getId())) {
       if (sharePointUrl.isSiteCollectionUrl()) {
-        log.log(Level.FINE, "Returning null SiteAdaptor for root document "
-            + " because adaptor is currently configured in site collection "
-            + "mode for {0} only.", sharePointUrl.getSharePointUrl());
+        log.log(
+            Level.FINE,
+            "Returning null SiteConnector for root document "
+                + " because connector is currently configured in site collection "
+                + "mode for {0} only.",
+            sharePointUrl.getSharePointUrl());
         return null;
       }
-      return getSiteAdaptor(sharePointUrl.getVirtualServerUrl(),
-          sharePointUrl.getVirtualServerUrl());
-    } 
-    URI uri = spUrlToUri(docId.getUniqueId());
+      return getSiteConnector(
+          sharePointUrl.getVirtualServerUrl(), sharePointUrl.getVirtualServerUrl());
+    }
+    URI uri = spUrlToUri(entry.getId());
     if (!ntlmAuthenticator.isPermittedHost(uri.toURL())) {
       log.log(Level.WARNING, "URL {0} not white listed", uri);
       return null;
-    }      
+    }
     String rootUrl;
     try {
-       rootUrl = getRootUrl(uri);
+      rootUrl = getRootUrl(uri);
     } catch (URISyntaxException e) {
       throw new IOException(e);
     }
-    SiteAdaptor rootAdaptor = getSiteAdaptor(rootUrl, rootUrl);
-    SiteAdaptor adaptorForUrl =
-        rootAdaptor.getAdaptorForUrl(docId.getUniqueId());
-    if (adaptorForUrl == null) {
-      return null;
-    }    
-    if (sharePointUrl.isSiteCollectionUrl() &&
-        // Performing case sensitive comparison as mismatch in URL casing 
-        // between SharePoint Server and adaptor can result in broken ACL
-        // inheritance chain on GSA.
-        !sharePointUrl.getSharePointUrl().equals(adaptorForUrl.siteUrl)) {
-      log.log(Level.FINE, "Returning null SiteAdaptor for {0} because "
-          + "adaptor is currently configured in site collection mode "
-          + "for {1} only.", new Object[] {docId.getUniqueId(),
-          sharePointUrl.getSharePointUrl()});
+    SiteConnector rootConnector = getSiteConnector(rootUrl, rootUrl);
+    SiteConnector connectorForUrl = rootConnector.getConnectorForUrl(entry.getId());
+    if (connectorForUrl == null) {
       return null;
     }
-    return adaptorForUrl;    
+    if (sharePointUrl.isSiteCollectionUrl()
+        &&
+        // Performing case sensitive comparison as mismatch in URL casing
+        // between SharePoint Server and connector can result in broken ACL
+        // inheritance chain on GSA.
+        !sharePointUrl.getSharePointUrl().equals(connectorForUrl.siteUrl)) {
+      log.log(
+          Level.FINE,
+          "Returning null SiteConnector for {0} because "
+              + "connector is currently configured in site collection mode "
+              + "for {1} only.",
+          new Object[] {entry.getId(), sharePointUrl.getSharePointUrl()});
+      return null;
+    }
+    return connectorForUrl;
   }
-  
+
   private String getRootUrl(URI uri) throws URISyntaxException {
     return new URI(
         uri.getScheme(), uri.getAuthority(), null, null, null).toString();
@@ -1663,20 +1668,20 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     // AD User
     if (loginName.startsWith("i:0#.w|")) {
       return loginName.substring(7);
-    // AD Group
+      // AD Group
     } else if (loginName.startsWith("c:0+.w|")) {
       return name;
     } else if (loginName.equals("c:0(.s|true")) {
       return "Everyone";
     } else if (loginName.equals("c:0!.s|windows")) {
       return "NT AUTHORITY\\authenticated users";
-    // Forms authentication role  
+      // Forms authentication role
     } else if (loginName.startsWith("c:0-.f|")) {
       return loginName.substring(7).replace("|", ":");
-    // Forms authentication user  
+      // Forms authentication user
     } else if (loginName.startsWith("i:0#.f|")) {
       return loginName.substring(7).replace("|", ":");
-    // Identity and role claims for trusted providers such as ADFS   
+      // Identity and role claims for trusted providers such as ADFS
     } else if (loginName.matches("^([i|c]\\:0.\\.t\\|).*$")) {
       String[] parts = loginName.split(Pattern.quote("|"), 3);
       if (parts.length == 3) {
@@ -1686,16 +1691,25 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     log.log(Level.WARNING, "Unsupported claims value {0}", loginName);
     return null;
   }
-  
+
+  // TODO(tvartak) : Move this to SDK once we add namespace support
+  static String getPrincipalName(String name, String namespace) {
+    if (Strings.isNullOrEmpty(namespace)) return name;
+    return String.format("%s:%s", name, namespace);
+  }
+
+  static String getFragmentId(String id, String fragment) {
+    return String.format("%s?%s", id, fragment);
+  }
+
   /**
-   * Method to get decoded login name for users and groups principals. For 
-   * claims encoded domain groups if performSidLookup is true, this method will
-   * use {@link ActiveDirectoryClient} to convert sid to domain\groupname.
-   * If conversion fails method will return displayName as login name.
-   * In other cases decodeClaims method will decode input loginName.   
+   * Method to get decoded login name for users and groups principals. For claims encoded domain
+   * groups if performSidLookup is true, this method will use {@link ActiveDirectoryClient} to
+   * convert sid to domain\groupname. If conversion fails method will return displayName as login
+   * name. In other cases decodeClaims method will decode input loginName.
    */
-  private String getLoginNameForPrincipal(String loginName,
-      String displayName, boolean isDomainGroup) {
+  private String getLoginNameForPrincipal(
+      String loginName, String displayName, boolean isDomainGroup) {
     if (isDomainGroup && performSidLookup && loginName.startsWith("c:0+.w|")) {
       try {
         String groupSid = loginName.substring(7);
@@ -1713,73 +1727,76 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
             + "User %s. Returing display name %s as fallback.",
             loginName, displayName), ex);
         return displayName;
-      }      
+      }
     } else {
       return decodeClaim(loginName, displayName);
     }
   }
-  
+
   @VisibleForTesting
   class SharePointUrl {
     private final String sharePointUrl;
     private final String virtualServerUrl;
     private final boolean siteCollectionOnly;
-    
-    public SharePointUrl(String sharePointUrl,
-        String siteCollectionOnlyModeConfig)
+
+    public SharePointUrl(String sharePointUrl, String siteCollectionOnlyModeConfig)
         throws InvalidConfigurationException {
       if (sharePointUrl == null || siteCollectionOnlyModeConfig == null) {
         throw new NullPointerException();
       }
       sharePointUrl = sharePointUrl.trim();
       siteCollectionOnlyModeConfig = siteCollectionOnlyModeConfig.trim();
-      
+
       this.sharePointUrl = getCanonicalUrl(sharePointUrl);
-      
+
       if (!"".equals(siteCollectionOnlyModeConfig)) {
         this.siteCollectionOnly = Boolean.parseBoolean(
             siteCollectionOnlyModeConfig);
       } else {
         this.siteCollectionOnly =  this.sharePointUrl.split("/").length > 3;
-      }      
-      
+      }
+
       try {
-        this.virtualServerUrl = getRootUrl(encodeSharePointUrl(
-                this.sharePointUrl, performBrowserLeniency).toURI());
+        this.virtualServerUrl =
+            getRootUrl(encodeSharePointUrl(this.sharePointUrl, performBrowserLeniency).toURI());
       } catch (MalformedURLException exMalformed) {
         throw new InvalidConfigurationException(
-            "Adaptor is configured with malformed SharePoint URL [" 
-            + sharePointUrl + "]. Please specify valid SharePoint URL.",
+            "Connector is configured with malformed SharePoint URL ["
+                + sharePointUrl
+                + "]. Please specify valid SharePoint URL.",
             exMalformed);
       } catch (URISyntaxException exSyntax) {
         throw new InvalidConfigurationException(
-            "Adaptor is configured with invalid SharePoint URL [" 
-            + sharePointUrl + "]. Please specify valid SharePoint URL.",
+            "Connector is configured with invalid SharePoint URL ["
+                + sharePointUrl
+                + "]. Please specify valid SharePoint URL.",
             exSyntax);
       } catch (IOException ex) {
         throw new InvalidConfigurationException(
-            "Adaptor is configured with invalid SharePoint URL [" 
-            + sharePointUrl + "]. Please specify valid SharePoint URL.",
-            ex);        
+            "Connector is configured with invalid SharePoint URL ["
+                + sharePointUrl
+                + "]. Please specify valid SharePoint URL.",
+            ex);
       } catch (IllegalArgumentException exIllegal) {
         throw new InvalidConfigurationException(
-            "Adaptor is configured with invalid SharePoint URL [" 
-            + sharePointUrl + "]. Please specify valid SharePoint URL.",
-            exIllegal);        
+            "Connector is configured with invalid SharePoint URL ["
+                + sharePointUrl
+                + "]. Please specify valid SharePoint URL.",
+            exIllegal);
       }
     }
-    
+
     public boolean isSiteCollectionUrl() {
       return this.siteCollectionOnly;
     }
-    
+
     public String getVirtualServerUrl() {
       return this.virtualServerUrl;
     }
     public String getSharePointUrl() {
       return this.sharePointUrl;
     }
-    
+
     @Override
     public String toString() {
       return "SharePointUrl(sharePointUrl = " + sharePointUrl
@@ -1789,13 +1806,12 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   }
 
   @VisibleForTesting
-  class SiteAdaptor {
+  class SiteConnector {
     private final SiteDataClient siteDataClient;
     private final UserGroupSoap userGroup;
     private final PeopleSoap people;
     private final String siteUrl;
     private final String webUrl;
-    private final DocId siteDocId;
     /**
      * Callable for accessing an up-to-date instance of {@link MemberIdMapping}.
      * Using a callable instead of accessing {@link #memberIdsCache} directly as
@@ -1816,12 +1832,11 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
      */
     private final Object refreshSiteUserMappingLock = new Object();
 
-    public SiteAdaptor(String site, String web, SiteDataSoap siteDataSoap,
+    public SiteConnector(String site, String web, SiteDataSoap siteDataSoap,
         UserGroupSoap userGroupSoap, PeopleSoap people,
         Callable<MemberIdMapping> memberIdMappingCallable,
         Callable<MemberIdMapping> siteUserIdMappingCallable) {
-      log.entering("SiteAdaptor", "SiteAdaptor",
-          new Object[] {site, web, siteDataSoap});
+      log.entering("SiteConnector", "SiteConnector", new Object[] {site, web, siteDataSoap});
       if (site.endsWith("/")) {
         throw new AssertionError();
       }
@@ -1832,14 +1847,13 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         throw new NullPointerException();
       }
       this.siteUrl = site;
-      this.siteDocId = new DocId(site);
       this.webUrl = web;
       this.userGroup = userGroupSoap;
       this.people = people;
       this.siteDataClient = new SiteDataClient(siteDataSoap, xmlValidation);
       this.memberIdMappingCallable = memberIdMappingCallable;
       this.siteUserIdMappingCallable = siteUserIdMappingCallable;
-      log.exiting("SiteAdaptor", "SiteAdaptor");
+      log.exiting("SiteConnector", "SiteConnector");
     }
 
     private MemberIdMapping getMemberIdMapping() throws IOException {
@@ -1894,7 +1908,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       return getSiteUserMapping();
     }
 
-     private MemberIdMapping getSiteUserMapping() throws IOException {
+    private MemberIdMapping getSiteUserMapping() throws IOException {
       try {
         return siteUserIdMappingCallable.call();
       } catch (IOException ex) {
@@ -1904,23 +1918,21 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       }
     }
 
-    public void getDocContent(Request request, Response response)
-        throws IOException {
-      log.entering("SiteAdaptor", "getDocContent",
-          new Object[] {request, response});
-      String url = request.getDocId().getUniqueId();
+    public void getDocContent(QueueEntry entry) throws IOException {
+      log.entering("SiteConnector", "getDocContent", entry);
+      String url = entry.getId();
       // SiteData.GetUrlSegment call fails for URLs with trailing slash.
       // Responding not found as DocId ends with trailing slash.
       if (url.endsWith("/")) {
         log.log(Level.WARNING,
             "Responding not found as DocId {0} ends with trailing slash", url);
-        response.respondNotFound();
-        log.exiting("SiteAdaptor", "getDocContent");
+        indexingService.deleteItem(entry.getId());
+        log.exiting("SiteConnector", "getDocContent");
         return;
       }
-      if (getAttachmentDocContent(request, response)) {
+      if (getAttachmentDocContent(entry)) {
         // Success, it was an attachment.
-        log.exiting("SiteAdaptor", "getDocContent");
+        log.exiting("SiteConnector", "getDocContent");
         return;
       }
 
@@ -1928,33 +1940,31 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       Holder<String> itemId = new Holder<String>();
       // No need to retrieve webId, since it isn't populated when you contact a
       // web's SiteData.asmx page instead of its parent site's.
-      boolean result = siteDataClient.getUrlSegments(
-          request.getDocId().getUniqueId(), listId, itemId);
+      boolean result = siteDataClient.getUrlSegments(entry.getId(), listId, itemId);
       if (!result) {
         // It may still be an aspx page.
-        if (request.getDocId().getUniqueId().toLowerCase(Locale.ENGLISH)
-            .endsWith(".aspx")) {
-          getAspxDocContent(request, response);
+        if (entry.getId().toLowerCase(Locale.ENGLISH).endsWith(".aspx")) {
+          getAspxDocContent(entry);
         } else {
           log.log(Level.FINE, "responding not found");
-          response.respondNotFound();
+          indexingService.deleteItem(entry.getId());
         }
-        log.exiting("SiteAdaptor", "getDocContent");
+        log.exiting("SiteConnector", "getDocContent");
         return;
       }
       if (itemId.value != null) {
-        getListItemDocContent(request, response, listId.value, itemId.value);
+        getListItemDocContent(entry, listId.value, itemId.value);
       } else if (listId.value != null) {
-        getListDocContent(request, response, listId.value);
+        getListDocContent(entry, listId.value);
       } else {
         // Assume it is a top-level site.
-        getSiteDocContent(request, response);
+        getSiteDocContent(entry);
       }
-      log.exiting("SiteAdaptor", "getDocContent");
+      log.exiting("SiteConnector", "getDocContent");
     }
 
-    private DocId encodeDocId(String url) {
-      log.entering("SiteAdaptor", "encodeDocId", url);
+    private String encodeDocId(String url) {
+      log.entering("SiteConnector", "encodeDocId", url);
       if (url.toLowerCase().startsWith("https://")
           || url.toLowerCase().startsWith("http://")) {
         // Leave as-is.
@@ -1966,13 +1976,12 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         String[] parts = webUrl.split("/", 4);
         url = parts[0] + "//" + parts[2] + url;
       }
-      DocId docId = new DocId(url);
-      log.exiting("SiteAdaptor", "encodeDocId", docId);
-      return docId;
+      log.exiting("SiteConnector", "encodeDocId", url);
+      return url;
     }
 
-    private URI docIdToUri(DocId docId) throws IOException {
-      return spUrlToUri(docId.getUniqueId());
+    private URI docIdToUri(String url) throws IOException {
+      return spUrlToUri(url);
     }
 
     /**
@@ -1984,10 +1993,8 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       return docIdToUri(encodeDocId(path));
     }
 
-    private void getVirtualServerDocContent(Request request, Response response)
-        throws IOException {
-      log.entering("SiteAdaptor", "getVirtualServerDocContent",
-          new Object[] {request, response});
+    private void getVirtualServerDocContent() throws IOException {
+      log.entering("SiteConnector", "getVirtualServerDocContent");
       VirtualServer vs = siteDataClient.getContentVirtualServer();
 
       final long necessaryPermissionMask = LIST_ITEM_MASK;
@@ -2012,8 +2019,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         String loginName = policyUser.getLoginName();
         PrincipalInfo p = resolvedPolicyUsers.get(loginName);
         if (p == null || !p.isIsResolved()) {
-          log.log(Level.WARNING, 
-              "Unable to resolve Policy User = {0}", loginName);
+          log.log(Level.WARNING, "Unable to resolve Policy User = {0}", loginName);
           continue;
         }
         // TODO(ejona): special case NT AUTHORITY\LOCAL SERVICE.
@@ -2023,21 +2029,20 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
               new Object[] {p.getAccountName(), p.getPrincipalType()});
           continue;
         }
-        boolean isGroup
-            = p.getPrincipalType() == SPPrincipalType.SECURITY_GROUP;
-        String accountName = getLoginNameForPrincipal(
-            p.getAccountName(), p.getDisplayName(), isGroup);                
+        boolean isGroup = p.getPrincipalType() == SPPrincipalType.SECURITY_GROUP;
+        String accountName =
+            getLoginNameForPrincipal(p.getAccountName(), p.getDisplayName(), isGroup);
         if (accountName == null) {
-          log.log(Level.WARNING, 
-              "Unable to decode claim. Skipping policy user {0}", loginName);
+          log.log(Level.WARNING, "Unable to decode claim. Skipping policy user {0}", loginName);
           continue;
         }
         log.log(Level.FINER, "Policy User accountName = {0}", accountName);
         Principal principal;
         if (isGroup) {
-          principal = new GroupPrincipal(accountName, defaultNamespace);
+          principal =
+              Acl.getExternalGroupPrincipal(getPrincipalName(accountName, defaultNamespace));
         } else {
-          principal = new UserPrincipal(accountName, defaultNamespace);
+          principal = Acl.getExternalUserPrincipal(getPrincipalName(accountName, defaultNamespace));
         }
         long grant = policyUser.getGrantMask().longValue();
         if ((necessaryPermissionMask & grant) == necessaryPermissionMask) {
@@ -2049,41 +2054,31 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           denies.add(principal);
         }
       }
-      response.setAcl(new Acl.Builder()
-          .setEverythingCaseInsensitive()
-          .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
-          .setPermits(permits).setDenies(denies).build());
-      
-      response.addMetadata(METADATA_OBJECT_TYPE,
-          ObjectType.VIRTUAL_SERVER.value());
-
-      HtmlResponseWriter writer = createHtmlResponseWriter(response);
-      writer.start(request.getDocId(), ObjectType.VIRTUAL_SERVER,
-          vs.getMetadata().getURL());
-
-      writer.startSection(ObjectType.SITE);
-      DocIdEncoder encoder = context.getDocIdEncoder();
+      com.google.api.services.springboardindex.model.Item item =
+          new com.google.api.services.springboardindex.model.Item();
+      item.setId(VIRTUAL_SERVER_ID);
+      item.setReaders(permits).setDeniedReaders(denies);
+      indexingService.updateItem(item, true);
+      List<PushEntry> sites = new ArrayList<>();
       for (ContentDatabases.ContentDatabase cdcd
           : vs.getContentDatabases().getContentDatabase()) {
         try {
-          ContentDatabase cd
-              = siteDataClient.getContentContentDatabase(cdcd.getID(), true);
+          ContentDatabase cd = siteDataClient.getContentContentDatabase(cdcd.getID(), true);
           if (cd.getSites() != null) {
             for (Sites.Site site : cd.getSites().getSite()) {
               String siteUrl = site.getURL();
               siteUrl = getCanonicalUrl(siteUrl);
-              writer.addLink(encodeDocId(siteUrl), null);
+              sites.add(new PushEntry().setId(encodeDocId(siteUrl)));
             }
           }
         } catch (IOException ex) {
-          log.log(Level.WARNING,
-              "Error retriving sites from content database " + cdcd.getID(),
-              ex);          
+          log.log(Level.WARNING, "Error retriving sites from content database " + cdcd.getID(), ex);
         }
       }
-      writer.finish();
-      log.exiting("SiteAdaptor", "getVirtualServerDocContent");
+      indexingService.push(sites);
+      log.exiting("SiteConnector", "getVirtualServerDocContent");
     }
+
 
     /**
      * Returns the url of the parent of the web. The parent url is not the same
@@ -2116,21 +2111,18 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       if (isWebSiteCollection()) {
         return false;
       }
-      SiteAdaptor siteAdaptor = getSiteAdaptor(siteUrl, getWebParentUrl());
-      return siteAdaptor.isWebNoIndex(
-          rareModCache.getWeb(siteAdaptor.siteDataClient));
+      SiteConnector siteConnector = getSiteConnector(siteUrl, getWebParentUrl());
+      return siteConnector.isWebNoIndex(rareModCache.getWeb(siteConnector.siteDataClient));
     }
 
-    private void getSiteDocContent(Request request, Response response)
-        throws IOException {
-      log.entering("SiteAdaptor", "getSiteDocContent",
-          new Object[] {request, response});
+    private void getSiteDocContent(QueueEntry entry) throws IOException {
+      log.entering("SiteConnector", "getSiteDocContent", entry);
       Web w = siteDataClient.getContentWeb();
 
       if (isWebNoIndex(new CachedWeb(w))) {
         log.fine("Document marked for NoIndex");
-        response.respondNotFound();
-        log.exiting("SiteAdaptor", "getSiteDocContent");
+        indexingService.deleteItem(entry.getId());
+        log.exiting("SiteConnector", "getSiteDocContent");
         return;
       }
 
@@ -2139,123 +2131,99 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       }
 
       if (isWebSiteCollection()) {
-        Collection<Principal> admins = new LinkedList<Principal>();
+        List<Principal> admins = new ArrayList<>();
         for (UserDescription user : w.getUsers().getUser()) {
           if (user.getIsSiteAdmin() != TrueFalseType.TRUE) {
             continue;
           }
           Principal principal = userDescriptionToPrincipal(user);
           if (principal == null) {
-            log.log(Level.WARNING,
-                "Unable to determine login name. Skipping admin user with ID "
-                + "{0}", user.getID());
+            log.log(
+                Level.WARNING,
+                "Unable to determine login name. Skipping admin user with ID " + "{0}",
+                user.getID());
             continue;
           }
           admins.add(principal);
         }
-        Acl.Builder acl = new Acl.Builder().setEverythingCaseInsensitive()
-            .setPermits(admins)
-            .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES);
-        if (!sharePointUrl.isSiteCollectionUrl() && !useFlatAcls) {
-          acl.setInheritFrom(virtualServerDocId);
+        com.google.api.services.springboardindex.model.Item adminFragment =
+            new com.google.api.services.springboardindex.model.Item();
+        adminFragment.setId(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT));
+        adminFragment.setReaders(admins);
+        if (!sharePointUrl.isSiteCollectionUrl()) {
+          adminFragment.setInheritanceType(Acl.PARENT_OVERRIDE).setInheritFrom(VIRTUAL_SERVER_ID);
         } else {
-          log.log(Level.INFO, "Not inheriting from Web application policy "
-              + "since adaptor is configured for site collection only mode.");
+          log.log(
+              Level.INFO,
+              "Not inheriting from Web application policy "
+                  + "since connector is configured for site collection only mode.");
         }
-        response.putNamedResource(SITE_COLLECTION_ADMIN_FRAGMENT, acl.build());
-        final GroupMembership groups =
-            siteDataClient.getContentSite().getGroups();        
-        final String siteUrl = request.getDocId().getUniqueId();
-        executor.execute(new Runnable() {
-          @Override
-          public void run() {
-            try {
-              final Map<GroupPrincipal, Collection<Principal>> groupDefs =
-                  new HashMap<GroupPrincipal, Collection<Principal>>();
-              groupDefs.putAll(computeMembersForGroups(groups));
-              context.getDocIdPusher().pushGroupDefinitions(groupDefs, false);
-            } catch (InterruptedException e) {
-              log.log(Level.WARNING,
-                  "interrupted during group push for site " + siteUrl, e);
-              Thread.currentThread().interrupt();
-            }
-          }
-        });
+        indexingService.updateItem(adminFragment, true);
+        GroupMembership groups = siteDataClient.getContentSite().getGroups();
+        Map<ExternalGroup, Collection<Principal>> groupDefs =
+            new HashMap<ExternalGroup, Collection<Principal>>();
+        groupDefs.putAll(computeMembersForGroups(groups));
+        for (ExternalGroup externalGroup : groupDefs.keySet()) {
+          indexingService.updateExternalGroup(externalGroup);
+        }
       }
 
-      boolean allowAnonymousAccess
-          = isAllowAnonymousReadForWeb(new CachedWeb(w))
-          // Check if anonymous access is denied by web application policy
-          && (!isDenyAnonymousAccessOnVirtualServer());
+      boolean allowAnonymousAccess =
+          isAllowAnonymousReadForWeb(new CachedWeb(w))
+              // Check if anonymous access is denied by web application policy
+              && (!isDenyAnonymousAccessOnVirtualServer());
+
+      com.google.api.services.springboardindex.model.Item item =
+          new com.google.api.services.springboardindex.model.Item();
+      item.setId(entry.getId());
 
       if (!allowAnonymousAccess) {
+        item.setInheritanceType(Acl.PARENT_OVERRIDE);
         final boolean includePermissions;
-        if (isWebSiteCollection() || useFlatAcls) {
+        if (isWebSiteCollection()) {
           includePermissions = true;
         } else {
-          SiteAdaptor parentSiteAdaptor
-              = getSiteAdaptor(siteUrl, getWebParentUrl());
-          Web parentW = parentSiteAdaptor.siteDataClient.getContentWeb();
-          String parentScopeId
-              = parentW.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
-          String scopeId
-              = w.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
+          SiteConnector parentSiteConnector = getSiteConnector(siteUrl, getWebParentUrl());
+          Web parentW = parentSiteConnector.siteDataClient.getContentWeb();
+          String parentScopeId = parentW.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
+          String scopeId = w.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
           includePermissions = !scopeId.equals(parentScopeId);
         }
-        Acl.Builder acl;
         if (includePermissions) {
-          List<Permission> permissions
-              = w.getACL().getPermissions().getPermission();
-          acl = generateAcl(permissions, LIST_ITEM_MASK);
-          if (!useFlatAcls) {
-            acl.setInheritFrom(siteDocId, SITE_COLLECTION_ADMIN_FRAGMENT);
-          }
+          List<Permission> permissions = w.getACL().getPermissions().getPermission();
+          item.setReaders(generateAcl(permissions, LIST_ITEM_MASK))
+              .setInheritFrom(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT));
         } else {
-          acl = new Acl.Builder().setInheritFrom(new DocId(getWebParentUrl()));
+          item.setInheritFrom(getWebParentUrl());
         }
-        response.setAcl(acl
-            .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
-            .build());
       }
-      
-      response.addMetadata(METADATA_OBJECT_TYPE, ObjectType.SITE.value());
-      response.addMetadata(METADATA_PARENT_WEB_TITLE,
-          w.getMetadata().getTitle());      
 
-      response.setDisplayUrl(spUrlToUri(w.getMetadata().getURL()));
-      HtmlResponseWriter writer = createHtmlResponseWriter(response);
-      writer.start(request.getDocId(), ObjectType.SITE,
-          w.getMetadata().getTitle());
-
-      DocIdEncoder encoder = context.getDocIdEncoder();
+      item.setViewUrl(spUrlToUri(w.getMetadata().getURL()).toString());
+      List<PushEntry> entries = new ArrayList<>();
       if (w.getWebs() != null) {
-        writer.startSection(ObjectType.SITE);
         for (Webs.Web web : w.getWebs().getWeb()) {
-          String childWebUrl = getCanonicalUrl(web.getURL());          
-          writer.addLink(encodeDocId(childWebUrl), childWebUrl);
+          String childWebUrl = getCanonicalUrl(web.getURL());
+          entries.add(new PushEntry().setId(encodeDocId(childWebUrl)));
         }
       }
       if (w.getLists() != null) {
-        writer.startSection(ObjectType.LIST);
         for (Lists.List list : w.getLists().getList()) {
           if ("".equals(list.getDefaultViewUrl())) {
             // Do some I/O to give a good informational message. This is
             // expected to be a very rare case.
-            com.microsoft.schemas.sharepoint.soap.List l
-                = siteDataClient.getContentList(list.getID());
+            com.microsoft.schemas.sharepoint.soap.List l =
+                siteDataClient.getContentList(list.getID());
             log.log(Level.INFO,
                 "Ignoring List {0} in {1}, since it has no default view URL",
                 new Object[] {l.getMetadata().getTitle(), webUrl});
             continue;
           }
-          writer.addLink(encodeDocId(list.getDefaultViewUrl()),
-              list.getDefaultViewUrl());
+          entries.add(new PushEntry().setId(encodeDocId(list.getDefaultViewUrl())));
         }
       }
       if (w.getFPFolder() != null) {
         FolderData f = w.getFPFolder();
         if (!f.getFolders().isEmpty()) {
-          writer.startSection(ObjectType.FOLDER);
           for (Folders folders : f.getFolders()) {
             if (folders.getFolder() != null) {
               for (Folders.Folder folder : folders.getFolder()) {
@@ -2263,126 +2231,114 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
                 if ("Lists".equals(folder.getURL())) {
                   continue;
                 }
-                writer.addLink(encodeDocId(folder.getURL()), null);
+                entries.add(new PushEntry().setId(encodeDocId(folder.getURL())));
               }
             }
           }
         }
         if (!f.getFiles().isEmpty()) {
-          writer.startSection(ObjectType.LIST_ITEM);
           for (Files files : f.getFiles()) {
             if (files.getFile() != null) {
               for (Files.File file : files.getFile()) {
-                writer.addLink(encodeDocId(file.getURL()), null);
+                entries.add(new PushEntry().setId(encodeDocId(file.getURL())));
               }
             }
           }
         }
       }
-      writer.finish();
-      log.exiting("SiteAdaptor", "getSiteDocContent");
+      indexingService.push(entries);
+      log.log(Level.INFO, "Pushing Item {0}", item);
+      indexingService.updateItem(item, true);
+      log.exiting("SiteConnector", "getSiteDocContent");
     }
 
-    private void getListDocContent(Request request, Response response,
-        String id) throws IOException {
-      log.entering("SiteAdaptor", "getListDocContent",
-          new Object[] {request, response, id});
-      com.microsoft.schemas.sharepoint.soap.List l
-          = siteDataClient.getContentList(id);
+    private void getListDocContent(QueueEntry entry, String id) throws IOException {
+      log.entering("SiteConnector", "getListDocContent", new Object[] {entry, id});
+      com.microsoft.schemas.sharepoint.soap.List l = siteDataClient.getContentList(id);
       Web w = siteDataClient.getContentWeb();
 
       if (TrueFalseType.TRUE.equals(l.getMetadata().getNoIndex())
           || isWebNoIndex(new CachedWeb(w))) {
         log.fine("Document marked for NoIndex");
-        response.respondNotFound();
-        log.exiting("SiteAdaptor", "getListDocContent");
+        indexingService.deleteItem(entry.getId());
+        log.exiting("SiteConnector", "getListDocContent");
         return;
       }
 
-      boolean allowAnonymousAccess
-          = isAllowAnonymousReadForList(new CachedList(l))
-          && isAllowAnonymousPeekForWeb(new CachedWeb(w))
-          && (!isDenyAnonymousAccessOnVirtualServer());
-
+      boolean allowAnonymousAccess =
+          isAllowAnonymousReadForList(new CachedList(l))
+              && isAllowAnonymousPeekForWeb(new CachedWeb(w))
+              && (!isDenyAnonymousAccessOnVirtualServer());
+      com.google.api.services.springboardindex.model.Item item =
+          new com.google.api.services.springboardindex.model.Item();
+      item.setId(entry.getId());
       if (!allowAnonymousAccess) {
         String scopeId =
             l.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
         String webScopeId =
             w.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
 
-        DocId rootFolderDocId = encodeDocId(l.getMetadata().getRootFolder());
-        Acl.Builder acl;
-        if (useFlatAcls) {
+        String rootFolderDocId = encodeDocId(l.getMetadata().getRootFolder());
+        com.google.api.services.springboardindex.model.Item rootFolder =
+            new com.google.api.services.springboardindex.model.Item();
+        rootFolder.setId(rootFolderDocId);
+
+        if (scopeId.equals(webScopeId)) {
+          rootFolder.setInheritFrom(webUrl);
+          rootFolder.setInheritanceType(Acl.PARENT_OVERRIDE);
+        } else {
           List<Permission> permissions =
               l.getACL().getPermissions().getPermission();
-          acl = generateAcl(permissions, LIST_ITEM_MASK);
-          response.setAcl(acl.build());
-        } else {
-          if (scopeId.equals(webScopeId)) {
-            acl = new Acl.Builder().setInheritFrom(new DocId(webUrl));
-          } else {
-            List<Permission> permissions =
-                l.getACL().getPermissions().getPermission();
-            acl = generateAcl(permissions, LIST_ITEM_MASK)
-                .setInheritFrom(siteDocId, SITE_COLLECTION_ADMIN_FRAGMENT);
-          }
-          response.setAcl(new Acl.Builder().setInheritFrom(rootFolderDocId)
-              .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
-              .build());
-          context.getAsyncDocIdPusher().pushNamedResource(rootFolderDocId,
-              acl.setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
-              .build());
+          rootFolder
+              .setReaders(generateAcl(permissions, LIST_ITEM_MASK))
+              .setInheritFrom(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT))
+              .setInheritanceType(Acl.PARENT_OVERRIDE);
+
         }
+        indexingService.updateItem(rootFolder, true);
+        item.setInheritFrom(rootFolderDocId).setInheritanceType(Acl.PARENT_OVERRIDE);
       }
 
-      response.addMetadata(METADATA_OBJECT_TYPE,
-          ObjectType.LIST.value());
-      response.addMetadata(METADATA_PARENT_WEB_TITLE,
-          w.getMetadata().getTitle());
-      response.addMetadata(METADATA_LIST_GUID, l.getMetadata().getID());
+      URI displayUri = sharePointUrlToUri(
+          "/".equals(l.getMetadata().getDefaultViewUrl())
+          ? l.getMetadata().getRootFolder()
+          : l.getMetadata().getDefaultViewUrl());
 
-      response.setDisplayUrl(sharePointUrlToUri(
-            "/".equals(l.getMetadata().getDefaultViewUrl()) 
-            ? l.getMetadata().getRootFolder() 
-            : l.getMetadata().getDefaultViewUrl()));
+      item.setViewUrl(displayUri.toString());
+
       String lastModified = l.getMetadata().getLastModified();
       try {
-        response.setLastModified(
-            listLastModifiedDateFormat.get().parse(lastModified));
+        item.setContentModifiedTime(
+            new DateTime(listLastModifiedDateFormat.get().parse(lastModified)));
       } catch (ParseException ex) {
         log.log(Level.INFO, "Could not parse LastModified: {0}", lastModified);
       }
-      HtmlResponseWriter writer = createHtmlResponseWriter(response);
-      writer.start(request.getDocId(), ObjectType.LIST,
-          l.getMetadata().getTitle());
-      processFolder(id, "", writer);
-      writer.finish();
-      log.exiting("SiteAdaptor", "getListDocContent");
+      // TODO(tvartak) Add Html for List doc
+      processFolder(id, "");
+      indexingService.updateItem(item, true);
+      log.exiting("SiteConnector", "getListDocContent");
     }
 
-    /**
-     * {@code writer} should already have had {@link HtmlResponseWriter#start}
-     * called.
-     */
-    private void processFolder(String listGuid, String folderPath,
-        HtmlResponseWriter writer) throws IOException {
-      log.entering("SiteAdaptor", "processFolder",
-          new Object[] {listGuid, folderPath, writer});
-      Paginator<ItemData> folderPaginator
-          = siteDataClient.getContentFolderChildren(listGuid, folderPath);
-      writer.startSection(ObjectType.LIST_ITEM);
+    /** {@code writer} should already have had {@link HtmlResponseWriter#start} called. */
+    private void processFolder(String listGuid, String folderPath) throws IOException {
+      log.entering("SiteConnector", "processFolder", new Object[] {listGuid, folderPath});
+      Paginator<ItemData> folderPaginator =
+          siteDataClient.getContentFolderChildren(listGuid, folderPath);
       ItemData folder;
+      List<PushEntry> entries = new ArrayList<>();
       while ((folder = folderPaginator.next()) != null) {
         Xml xml = folder.getXml();
 
         Element data = getFirstChildWithName(xml, DATA_ELEMENT);
         for (Element row : getChildrenWithName(data, ROW_ELEMENT)) {
           String rowUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
-          String rowTitle = row.getAttribute(OWS_TITLE_ATTRIBUTE);
-          writer.addLink(encodeDocId(getCanonicalUrl(rowUrl)), rowTitle);
+          entries.add(new PushEntry().setId(encodeDocId(getCanonicalUrl(rowUrl))));
         }
       }
-      log.exiting("SiteAdaptor", "processFolder");
+      if (!entries.isEmpty()) {
+        indexingService.push(entries);
+      }
+      log.exiting("SiteConnector", "processFolder");
     }
 
     private boolean elementHasName(Element ele, QName name) {
@@ -2438,17 +2394,11 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       return attrs;
     }
 
-    private long addMetadata(Response response, String name, String value) {
-      return addMetadata(response, name, value, null);
-    }
-
-    private long addMetadata(Response response, String name, String value,
-        Multimap<String, String> addedMetadata) {
-      long size = 0;
+    private void addMetadata(String name, String value, Multimap<String, String> metadata) {
       if ("ows_MetaInfo".equals(name)) {
         // ows_MetaInfo is parsed out into other fields for us by SharePoint.
         // We filter it since it only duplicates those other fields.
-        return 0;
+        return;
       }
       if (name.startsWith("ows_")) {
         name = name.substring("ows_".length());
@@ -2462,13 +2412,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           if (parts[i].isEmpty()) {
             continue;
           }
-          response.addMetadata(name, parts[i]);
-          if (addedMetadata != null) {
-            addedMetadata.put(name, parts[i]);
-          }
-          // +30 for per-metadata-possible overhead, just to make sure that we
-          // don't count too few.
-          size += name.length() + parts[i].length() + 30;
+          metadata.put(name, parts[i]);
         }
       } else if (value.startsWith(";#") && value.endsWith(";#")) {
         // This is a multi-choice field. Values will be in the form:
@@ -2477,28 +2421,15 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           if (part.isEmpty()) {
             continue;
           }
-          response.addMetadata(name, part);
-          if (addedMetadata != null) {
-            addedMetadata.put(name, part);
-          }
-          // +30 for per-metadata-possible overhead, just to make sure that we
-          // don't count too few.
-          size += name.length() + part.length() + 30;
+          metadata.put(name, part);
         }
       } else {
-        response.addMetadata(name, value);
-        if (addedMetadata != null) {
-          addedMetadata.put(name, value);
-        }
-        // +30 for per-metadata-possible overhead, just to make sure that we
-        // don't count too few.
-        size += name.length() + value.length() + 30;
+        metadata.put(name, value);
       }
-      return size;
     }
 
-    private Acl.Builder generateAcl(List<Permission> permissions,
-        final long necessaryPermissionMask) throws IOException {
+    private List<Principal> generateAcl(
+        List<Permission> permissions, final long necessaryPermissionMask) throws IOException {
       List<Principal> permits = new LinkedList<Principal>();
       MemberIdMapping mapping = getMemberIdMapping();
       boolean memberIdMappingRefreshed = false;
@@ -2519,7 +2450,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
               new Object[] {id, webUrl, siteUrl});
           if (siteUserMapping == null) {
             siteUserMapping = getSiteUserMapping();
-          }          
+          }
           principal = siteUserMapping.getPrincipal(id);
         }
         if (principal == null && !memberIdMappingRefreshed) {
@@ -2527,7 +2458,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           mapping = refreshMemberIdMapping(mapping);
           memberIdMappingRefreshed = true;
           principal = mapping.getPrincipal(id);
-        }        
+        }
         if (principal == null && !siteUserMappingRefreshed) {
           // Try to refresh site user mapping and check again.
           siteUserMapping = refreshSiteUserMapping(siteUserMapping);
@@ -2536,21 +2467,20 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         }
 
         if (principal == null) {
-          log.log(Level.WARNING, "Could not resolve member id {0} for Web "
-              + "[{1}] under Site Collection [{2}].", 
+          log.log(
+              Level.WARNING,
+              "Could not resolve member id {0} for Web " + "[{1}] under Site Collection [{2}].",
               new Object[] {id, webUrl, siteUrl});
           continue;
         }
         permits.add(principal);
       }
-      return new Acl.Builder().setEverythingCaseInsensitive()
-          .setPermits(permits);
+      return permits;
     }
 
-    private void addPermitUserToAcl(int userId, Acl.Builder aclToUpdate)
-        throws IOException {
+    private Principal getUserPrincipal(int userId) throws IOException {
       if (userId == -1) {
-        return;
+        return null;
       }
       Principal principal = getMemberIdMapping().getPrincipal(userId);
       // MemberIdMapping will have information about users with explicit
@@ -2563,13 +2493,9 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       }
       if (principal == null) {
         log.log(Level.WARNING, "Could not resolve user id {0}", userId);
-        return;
-      }
 
-      List<Principal> permits
-          = new LinkedList<Principal>(aclToUpdate.build().getPermits());
-      permits.add(principal);
-      aclToUpdate.setPermits(permits);
+      }
+      return principal;
     }
 
     private boolean isPermitted(long permission,
@@ -2582,28 +2508,29 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     }
 
     private boolean isAllowAnonymousReadForWeb(CachedWeb w) {
-      boolean allowAnonymousRead
-          = (w.allowAnonymousAccess == TrueFalseType.TRUE)
-          && (w.anonymousViewListItems == TrueFalseType.TRUE)
-          && isPermitted(w.anonymousPermMask, LIST_ITEM_MASK);
+      boolean allowAnonymousRead =
+          (w.allowAnonymousAccess == TrueFalseType.TRUE)
+              && (w.anonymousViewListItems == TrueFalseType.TRUE)
+              && isPermitted(w.anonymousPermMask, LIST_ITEM_MASK);
       return allowAnonymousRead;
     }
 
     private boolean isAllowAnonymousReadForList(CachedList l) {
-      boolean allowAnonymousRead
-          = (l.readSecurity != LIST_READ_SECURITY_ENABLED)
-          && (l.allowAnonymousAccess == TrueFalseType.TRUE)
-          && (l.anonymousViewListItems == TrueFalseType.TRUE)
-          && isPermitted(l.anonymousPermMask, SPBasePermissions.VIEWLISTITEMS);
+      boolean allowAnonymousRead =
+          (l.readSecurity != LIST_READ_SECURITY_ENABLED)
+              && (l.allowAnonymousAccess == TrueFalseType.TRUE)
+              && (l.anonymousViewListItems == TrueFalseType.TRUE)
+              && isPermitted(l.anonymousPermMask, SPBasePermissions.VIEWLISTITEMS);
       return allowAnonymousRead;
     }
 
     private boolean isDenyAnonymousAccessOnVirtualServer() throws IOException {
-      // Since Adaptor is configured to use Site Collection Only mode we are
+      // Since Connector is configured to use Site Collection Only mode we are
       // ignoring web application policy.
       if (sharePointUrl.isSiteCollectionUrl()) {
-        log.fine("Ignoring web application policy acls since adaptor is "
-            + "configured for site collection only mode.");
+        log.fine(
+            "Ignoring web application policy acls since connector is "
+                + "configured for site collection only mode.");
         return false;
       }
       CachedVirtualServer vs = rareModCache.getVirtualServer();
@@ -2615,20 +2542,18 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       return vs.policyContainsDeny;
     }
 
-    private void getAspxDocContent(Request request, Response response)
-        throws IOException {
-      log.entering("SiteAdaptor", "getAspxDocContent",
-          new Object[] {request, response});
+    private void getAspxDocContent(QueueEntry entry) throws IOException {
+      log.entering("SiteConnector", "getAspxDocContent", entry);
 
       CachedWeb w = rareModCache.getWeb(siteDataClient);
       if (isWebNoIndex(w)) {
         log.fine("Document marked for NoIndex");
-        response.respondNotFound();
-        log.exiting("SiteAdaptor", "getAspxDocContent");
+        indexingService.deleteItem(entry.getId());
+        log.exiting("SiteConnector", "getAspxDocContent");
         return;
       }
 
-      String aspxId = request.getDocId().getUniqueId();
+      String aspxId = entry.getId();
       String parentId = aspxId.substring(0, aspxId.lastIndexOf('/'));
       boolean isDirectChild = webUrl.equalsIgnoreCase(parentId);
       // Check for valid ASPX pages
@@ -2639,73 +2564,70 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         // check if ASPX page is available under Web.getFPFolder().getFiles()
         log.log(Level.FINE, "Document [{0}] is not a direct child of Web [{1}]",
             new Object[] {aspxId, webUrl});
-        response.respondNotFound();
-        log.exiting("SiteAdaptor", "getAspxDocContent");
+        indexingService.deleteItem(entry.getId());
+        log.exiting("SiteConnector", "getAspxDocContent");
         return;
       }
 
-      boolean allowAnonymousAccess
-          = isAllowAnonymousReadForWeb(w)
-          // Check if anonymous access is denied by web application policy
-          && (!isDenyAnonymousAccessOnVirtualServer());
+      boolean allowAnonymousAccess =
+          isAllowAnonymousReadForWeb(w)
+              // Check if anonymous access is denied by web application policy
+              && (!isDenyAnonymousAccessOnVirtualServer());
+      com.google.api.services.springboardindex.model.Item item =
+          new com.google.api.services.springboardindex.model.Item();
+      item.setId(entry.getId());
       if (!allowAnonymousAccess) {
-        if (useFlatAcls) {
-          Web parentW = siteDataClient.getContentWeb();
-          List<Permission> permissions =
-              parentW.getACL().getPermissions().getPermission();
-          Acl.Builder acl = generateAcl(permissions, LIST_ITEM_MASK);
-          response.setAcl(acl.build());
-        } else {
-          response.setAcl(new Acl.Builder()
-              .setInheritFrom(new DocId(parentId))
-              .build());
-        }
+        item.setInheritanceType(Acl.PARENT_OVERRIDE).setInheritFrom(parentId);
       }
-      response.addMetadata(METADATA_OBJECT_TYPE, "Aspx");      
-      response.addMetadata(METADATA_PARENT_WEB_TITLE, w.webTitle);
-      getFileDocContent(request, response, true);
-      log.exiting("SiteAdaptor", "getAspxDocContent");
+      getFileDocContent(entry, item, true);
+      log.exiting("SiteConnector", "getAspxDocContent");
     }
 
     /**
-     * Blindly retrieve contents of DocId as if it were a file's URL. To prevent
-     * security issues, this should only be used after the DocId has been
-     * verified to be a valid document on the SharePoint instance. In addition,
-     * ACLs and other metadata and security measures should be set before making
-     * this call.
+     * Blindly retrieve contents of DocId as if it were a file's URL. To prevent security issues,
+     * this should only be used after the DocId has been verified to be a valid document on the
+     * SharePoint instance. In addition, ACLs and other metadata and security measures should be set
+     * before making this call.
      */
-    private void getFileDocContent(Request request, Response response,
-        boolean setLastModified) throws IOException {
-      log.entering("SiteAdaptor", "getFileDocContent",
-          new Object[] {request, response});
-      String contentUrl = request.getDocId().getUniqueId();
-      URI displayUrl = docIdToUri(request.getDocId());
+    private void getFileDocContent(
+        QueueEntry entry,
+        com.google.api.services.springboardindex.model.Item item,
+        boolean setLastModified)
+        throws IOException {
+      log.entering("SiteConnector", "getFileDocContent", entry);
+      String contentUrl = entry.getId();
+      URI displayUrl = spUrlToUri(entry.getId());
       long startMillis = System.currentTimeMillis();
-      FileInfo fi = httpClient.issueGetRequest(encodeSharePointUrl(
-              request.getDocId().getUniqueId(), performBrowserLeniency),
-          authenticationHandler.getAuthenticationCookies(), adaptorUserAgent,
-          maxRedirectsToFollow, performBrowserLeniency);
+      FileInfo fi =
+          httpClient.issueGetRequest(
+              encodeSharePointUrl(entry.getId(), performBrowserLeniency),
+              authenticationHandler.getAuthenticationCookies(),
+              sharepointUserAgent,
+              maxRedirectsToFollow,
+              performBrowserLeniency);
       if (fi == null) {
-        response.respondNotFound();
+        indexingService.deleteItem(entry.getId());
         return;
       }
-      log.log(Level.FINE, "Duration: fetch headers {0} : {1,number,#} ms",
-          new Object[] {contentUrl, System.currentTimeMillis() - startMillis});      
+      log.log(
+          Level.FINE,
+          "Duration: fetch headers {0} : {1,number,#} ms",
+          new Object[] {contentUrl, System.currentTimeMillis() - startMillis});
       try {
-        response.setDisplayUrl(displayUrl);
+        item.setViewUrl(contentUrl);
         String filePath = displayUrl.getPath();
         String fileExtension = "";
         if (filePath.lastIndexOf('.') > 0) {
           fileExtension = filePath.substring(
               filePath.lastIndexOf('.')).toLowerCase(Locale.ENGLISH);
-        }        
+        }
         if (FILE_EXTENSION_TO_MIME_TYPE_MAPPING.containsKey(fileExtension)) {
           String contentType =
               FILE_EXTENSION_TO_MIME_TYPE_MAPPING.get(fileExtension);
           log.log(Level.FINER,
               "Overriding content type as {0} for file extension {1}",
               new Object[] {contentType, fileExtension});
-          response.setContentType(contentType);          
+          item.setMimeType(contentType);
         } else {
           String contentType = fi.getFirstHeaderWithName("Content-Type");
           if (contentType != null) {
@@ -2713,45 +2635,52 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
             if (MIME_TYPE_MAPPING.containsKey(lowerType)) {
               contentType = MIME_TYPE_MAPPING.get(lowerType);
             }
-            response.setContentType(contentType);
+            item.setMimeType(contentType);
           }
         }
         String lastModifiedString = fi.getFirstHeaderWithName("Last-Modified");
         if (lastModifiedString != null && setLastModified) {
           try {
-            response.setLastModified(
-                dateFormatRfc1123.get().parse(lastModifiedString));
+            item.setContentModifiedTime(
+                new DateTime(dateFormatRfc1123.get().parse(lastModifiedString)));
           } catch (ParseException ex) {
             log.log(Level.INFO, "Could not parse Last-Modified: {0}",
                 lastModifiedString);
           }
         }
         long contentDownloadStart = System.currentTimeMillis();
-        IOHelper.copyStream(fi.getContents(), response.getOutputStream());
-        log.log(Level.FINE, "Duration: downlaod content {0} : {1,number,#} ms",
-            new Object[] {contentUrl,
-            System.currentTimeMillis() - contentDownloadStart});        
+        indexingService.updateItemAndContent(
+            item, new InputStreamContent(item.getMimeType(), fi.getContents()), true);
+        log.log(
+            Level.FINE,
+            "Duration: downlaod content {0} : {1,number,#} ms",
+            new Object[] {contentUrl, System.currentTimeMillis() - contentDownloadStart});
       } finally {
         fi.getContents().close();
       }
-      log.log(Level.FINE, "Duration: getFileDocContent {0} : {1,number,#} ms",
-          new Object[] {contentUrl, System.currentTimeMillis() - startMillis});      
-      log.exiting("SiteAdaptor", "getFileDocContent");
+      log.log(
+          Level.FINE,
+          "Duration: getFileDocContent {0} : {1,number,#} ms",
+          new Object[] {contentUrl, System.currentTimeMillis() - startMillis});
+      log.exiting("SiteConnector", "getFileDocContent");
     }
 
-    private void getListItemDocContent(Request request, Response response,
-        String listId, String itemId) throws IOException {
-      log.entering("SiteAdaptor", "getListItemDocContent",
-          new Object[] {request, response, listId, itemId});
+    private void getListItemDocContent(QueueEntry entry, String listId, String itemId)
+        throws IOException {
+      log.entering("SiteConnector", "getListItemDocContent", new Object[] {entry, listId, itemId});
       CachedList l = rareModCache.getList(siteDataClient, listId);
 
       CachedWeb w = rareModCache.getWeb(siteDataClient);
       if (TrueFalseType.TRUE.equals(l.noIndex) || isWebNoIndex(w)) {
         log.fine("Document marked for NoIndex");
-        response.respondNotFound();
-        log.exiting("SiteAdaptor", "getListItemDocContent");
+        indexingService.deleteItem(entry.getId());
+        log.exiting("SiteConnector", "getListItemDocContent");
         return;
       }
+
+      com.google.api.services.springboardindex.model.Item item =
+          new com.google.api.services.springboardindex.model.Item();
+      item.setId(entry.getId());
 
       boolean applyReadSecurity =
           (l.readSecurity == LIST_READ_SECURITY_ENABLED);
@@ -2767,8 +2696,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         log.log(Level.FINE, "No last modified information for list item");
       } else {
         try {
-          lastModified = modifiedDateFormat.get().parse(modifiedString);
-          response.setLastModified(lastModified);
+          item.setContentModifiedTime(new DateTime(modifiedDateFormat.get().parse(modifiedString)));
         } catch (ParseException ex) {
           log.log(Level.INFO, "Could not parse ows_Modified: {0}",
               modifiedString);
@@ -2777,8 +2705,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
 
       // This should be in the form of "1234;#{GUID}". We want to extract the
       // {GUID}.
-      String scopeId
-          = row.getAttribute(OWS_SCOPEID_ATTRIBUTE).split(";#", 2)[1];
+      String scopeId = row.getAttribute(OWS_SCOPEID_ATTRIBUTE).split(";#", 2)[1];
       scopeId = scopeId.toLowerCase(Locale.ENGLISH);
 
       // Anonymous access is disabled if read security is applicable for list.
@@ -2795,131 +2722,130 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           && (!isDenyAnonymousAccessOnVirtualServer());
 
       if (!allowAnonymousAccess) {
-      Acl.Builder acl = null;
-      if (!applyReadSecurity) {
-        String rawFileDirRef = row.getAttribute(OWS_FILEDIRREF_ATTRIBUTE);
-        // This should be in the form of "1234;#site/list/path". We want to
-        // extract the site/list/path. Path relative to host, even though it
-        // doesn't have a leading '/'.
-        DocId folderDocId = encodeDocId("/" + rawFileDirRef.split(";#", 2)[1]);
-        DocId rootFolderDocId = encodeDocId(l.rootFolder);
-        // If the parent is a list, folderDocId will be same as 
-        // rootFolderDocId. If inheritance chain is not 
-        // broken, item will inherit its permission from list root folder.
-        // If parent is a folder, item will inherit its permissions from parent
-        // folder.
-        boolean parentIsList = folderDocId.equals(rootFolderDocId);      
-        String parentScopeId;
-        // If current item has same scope id as list then inheritance is not
-        // broken irrespective of current item is inside folder or not.
-        if (parentIsList 
-            || scopeId.equals(l.scopeId.toLowerCase(Locale.ENGLISH))) {       
-          parentScopeId = l.scopeId.toLowerCase(Locale.ENGLISH);
-        } else {
-          // Instead of using getUrlSegments and getContent(ListItem), we could
-          // use just getContent(Folder). However, getContent(Folder) always
-          // returns children which could make the call very expensive. In
-          // addition, getContent(ListItem) returns all the metadata for the
-          // folder instead of just its scope so if in the future we need more
-          // metadata we will already have it. GetContentEx(Folder) may provide
-          // a way to get the folder's scope without its children, but it wasn't
-          // investigated.
-          Holder<String> folderListId = new Holder<String>();
-          Holder<String> folderItemId = new Holder<String>();
-          boolean result = siteDataClient.getUrlSegments(
-              folderDocId.getUniqueId(), folderListId, folderItemId);
-          if (!result) {
-            throw new IOException("Could not find parent folder's itemId");
+        if (!applyReadSecurity) {
+          String rawFileDirRef = row.getAttribute(OWS_FILEDIRREF_ATTRIBUTE);
+          // This should be in the form of "1234;#site/list/path". We want to
+          // extract the site/list/path. Path relative to host, even though it
+          // doesn't have a leading '/'.
+          String folderDocId = encodeDocId("/" + rawFileDirRef.split(";#", 2)[1]);
+          String rootFolderDocId = encodeDocId(l.rootFolder);
+          // If the parent is a list, folderDocId will be same as
+          // rootFolderDocId. If inheritance chain is not
+          // broken, item will inherit its permission from list root folder.
+          // If parent is a folder, item will inherit its permissions from parent
+          // folder.
+          boolean parentIsList = folderDocId.equals(rootFolderDocId);
+          String parentScopeId;
+          // If current item has same scope id as list then inheritance is not
+          // broken irrespective of current item is inside folder or not.
+          if (parentIsList || scopeId.equals(l.scopeId.toLowerCase(Locale.ENGLISH))) {
+            parentScopeId = l.scopeId.toLowerCase(Locale.ENGLISH);
+          } else {
+            // Instead of using getUrlSegments and getContent(ListItem), we could
+            // use just getContent(Folder). However, getContent(Folder) always
+            // returns children which could make the call very expensive. In
+            // addition, getContent(ListItem) returns all the metadata for the
+            // folder instead of just its scope so if in the future we need more
+            // metadata we will already have it. GetContentEx(Folder) may provide
+            // a way to get the folder's scope without its children, but it wasn't
+            // investigated.
+            Holder<String> folderListId = new Holder<String>();
+            Holder<String> folderItemId = new Holder<String>();
+            boolean result = siteDataClient.getUrlSegments(folderDocId, folderListId, folderItemId);
+            if (!result) {
+              throw new IOException("Could not find parent folder's itemId");
+            }
+            if (!listId.equals(folderListId.value)) {
+              throw new AssertionError("Unexpected listId value");
+            }
+            ItemData folderItem = siteDataClient.getContentItem(listId, folderItemId.value);
+            Element folderData = getFirstChildWithName(folderItem.getXml(), DATA_ELEMENT);
+            Element folderRow = getChildrenWithName(folderData, ROW_ELEMENT).get(0);
+            parentScopeId =
+                folderRow
+                    .getAttribute(OWS_SCOPEID_ATTRIBUTE)
+                    .split(";#", 2)[1]
+                    .toLowerCase(Locale.ENGLISH);
           }
-          if (!listId.equals(folderListId.value)) {
-            throw new AssertionError("Unexpected listId value");
+          if (scopeId.equals(parentScopeId)) {
+            item.setInheritanceType(Acl.PARENT_OVERRIDE).setInheritFrom(folderDocId);
+          } else {
+            // We have to search for the correct scope within the scopes element.
+            // The scope provided in the metadata is for the parent list, not for
+            // the item
+            Scopes scopes = getFirstChildOfType(xml, Scopes.class);
+            boolean hasAcl = false;
+            for (Scopes.Scope scope : scopes.getScope()) {
+              if (scope.getId().toLowerCase(Locale.ENGLISH).equals(scopeId)) {
+                item.setReaders(generateAcl(scope.getPermission(), LIST_ITEM_MASK))
+                    .setInheritFrom(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT))
+                    .setInheritanceType(Acl.PARENT_OVERRIDE);
+                hasAcl = true;
+                break;
+              }
+            }
+            if (!hasAcl) {
+              throw new IOException("Unable to find permission scope for item: " + entry.getId());
+            }
           }
-          ItemData folderItem
-              = siteDataClient.getContentItem(listId, folderItemId.value);
-          Element folderData = getFirstChildWithName(
-              folderItem.getXml(), DATA_ELEMENT);
-          Element folderRow
-              = getChildrenWithName(folderData, ROW_ELEMENT).get(0);
-          parentScopeId = folderRow.getAttribute(OWS_SCOPEID_ATTRIBUTE)
-              .split(";#", 2)[1].toLowerCase(Locale.ENGLISH);
-        }
-        if (scopeId.equals(parentScopeId)) {
-          acl = new Acl.Builder().setInheritFrom(folderDocId);
         } else {
-          // We have to search for the correct scope within the scopes element.
-          // The scope provided in the metadata is for the parent list, not for
-          // the item
+          final String fragmentName = "readSecurity";
+          List<Permission> permission = null;
           Scopes scopes = getFirstChildOfType(xml, Scopes.class);
           for (Scopes.Scope scope : scopes.getScope()) {
             if (scope.getId().toLowerCase(Locale.ENGLISH).equals(scopeId)) {
-              acl = generateAcl(scope.getPermission(), LIST_ITEM_MASK)
-                  .setInheritFrom(siteDocId, SITE_COLLECTION_ADMIN_FRAGMENT);
+              permission = scope.getPermission();
               break;
             }
           }
-        }
-
-        if (acl == null) {
-          throw new IOException("Unable to find permission scope for item: "
-              + request.getDocId());
-        }
-      } else {
-        final String fragmentName = "readSecurity";
-        List<Permission> permission = null;
-        Scopes scopes = getFirstChildOfType(xml, Scopes.class);
-        for (Scopes.Scope scope : scopes.getScope()) {
-          if (scope.getId().toLowerCase(Locale.ENGLISH).equals(scopeId)) {
-            permission = scope.getPermission();
-            break;
+          if (permission == null) {
+            permission = i.getMetadata().getScope().getPermissions().getPermission();
           }
-        }
-        if (permission == null) {
-          permission
-              = i.getMetadata().getScope().getPermissions().getPermission();
-        }
-        acl = generateAcl(permission, LIST_ITEM_MASK)
-            .setInheritFrom(request.getDocId(), fragmentName);
-        int authorId = -1;
-        String authorValue = row.getAttribute(OWS_AUTHOR_ATTRIBUTE);
-        if (authorValue != null) {
-          String[] authorInfo = authorValue.split(";#", 2);
-          if (authorInfo.length == 2) {
-            authorId = Integer.parseInt(authorInfo[0]);
+          item.setReaders(generateAcl(permission, LIST_ITEM_MASK))
+              .setInheritFrom(getFragmentId(entry.getId(), fragmentName))
+              .setInheritanceType(Acl.AND_BOTH_PERMIT);
+          int authorId = -1;
+          String authorValue = row.getAttribute(OWS_AUTHOR_ATTRIBUTE);
+          if (authorValue != null) {
+            String[] authorInfo = authorValue.split(";#", 2);
+            if (authorInfo.length == 2) {
+              authorId = Integer.parseInt(authorInfo[0]);
+            }
           }
+          com.google.api.services.springboardindex.model.Item namedResource =
+              new com.google.api.services.springboardindex.model.Item();
+          namedResource.setId(getFragmentId(entry.getId(), fragmentName));
+          List<Principal> readers = generateAcl(permission, READ_SECURITY_LIST_ITEM_MASK);
+          Principal author = getUserPrincipal(authorId);
+          if (author != null) {
+            readers.add(author);
+          }
+          namedResource
+              .setReaders(readers)
+              .setInheritFrom(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT))
+              .setInheritanceType(Acl.PARENT_OVERRIDE);
+          log.log(Level.INFO, "Updating item {0}", namedResource);
+          indexingService.updateItem(namedResource, true);
         }
-        Acl.Builder aclNamedResource
-            = generateAcl(permission, READ_SECURITY_LIST_ITEM_MASK)
-            .setInheritFrom(siteDocId, SITE_COLLECTION_ADMIN_FRAGMENT)
-            .setInheritanceType(Acl.InheritanceType.AND_BOTH_PERMIT);
-        addPermitUserToAcl(authorId, aclNamedResource);
-        response.putNamedResource(fragmentName, aclNamedResource.build());
-      }
-      response.setAcl(acl
-          .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDES)
-          .build());
       }
 
       // This should be in the form of "1234;#0". We want to extract the 0.
       String type = row.getAttribute(OWS_FSOBJTYPE_ATTRIBUTE).split(";#", 2)[1];
       boolean isFolder = "1".equals(type);
-      String title = row.getAttribute(OWS_TITLE_ATTRIBUTE);
       String serverUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
       Multimap<String, String> metadata = TreeMultimap.create();
-      long metadataLength = 0;
       for (Attr attribute : getAllAttributes(row)) {
-        metadataLength += addMetadata(response, attribute.getName(),
-            attribute.getValue(), metadata);
+        addMetadata(attribute.getName(), attribute.getValue(), metadata);
       }
-      metadataLength += addMetadata(response,
-          METADATA_PARENT_WEB_TITLE, w.webTitle);
-      metadataLength += addMetadata(response, METADATA_LIST_GUID, listId);
-      boolean canRespondWithNoContent = lastModified != null
-          && request.canRespondWithNoContent(lastModified);
-      
+      addMetadata(METADATA_PARENT_WEB_TITLE, w.webTitle, metadata);
+      addMetadata(METADATA_LIST_GUID, listId, metadata);
+      // TODO(tvartak) : Implement 204 handling
+      boolean canRespondWithNoContent = false;
+
       if (isFolder) {
-        String root = encodeDocId(l.rootFolder).getUniqueId();
+        String root = encodeDocId(l.rootFolder);
         root += "/";
-        String folder = encodeDocId(serverUrl).getUniqueId();
+        String folder = encodeDocId(serverUrl);
         if (!folder.startsWith(root)) {
           throw new AssertionError();
         }
@@ -2933,31 +2859,32 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           // encoded or unencoded. We leave them unencoded for simplicity of
           // implementation and to not deal with the possibility of
           // double-encoding.
-          response.setDisplayUrl(new URI(displayPage.getScheme(),
-              displayPage.getAuthority(), displayPage.getPath(),
-              "RootFolder=" + serverUrl, null));
+          URI displayUrl =
+              new URI(
+                  displayPage.getScheme(),
+                  displayPage.getAuthority(),
+                  displayPage.getPath(),
+                  "RootFolder=" + serverUrl,
+                  null);
+          item.setViewUrl(displayUrl.toString());
         } catch (URISyntaxException ex) {
           throw new IOException(ex);
         }
-        metadataLength += addMetadata(
-            response, METADATA_OBJECT_TYPE, ObjectType.FOLDER.value());      
+        addMetadata(METADATA_OBJECT_TYPE, ObjectType.FOLDER.value(), metadata);
         if (canRespondWithNoContent) {
-          log.log(Level.FINER, "Folder: Responding with 204 as Last-Modified "
-              + "is {0} and last access time is {1}",
-              new Object[] {lastModified, request.getLastAccessTime()});
-          response.respondNoContent();
-          log.exiting("SiteAdaptor", "getListItemDocContent");
+          log.log(
+              Level.FINER,
+              "Folder: Responding with 204 as Last-Modified "
+                  + "is {0} and last access time is {1}",
+              new Object[] {lastModified, entry.getItemUpdatedTime()});
+          indexingService.updateItem(item, true);
+          log.exiting("SiteConnector", "getListItemDocContent");
           return;
         }
-        
-        HtmlResponseWriter writer
-            = createHtmlResponseWriter(response, metadataLength);
-        writer.start(request.getDocId(), ObjectType.FOLDER, null);
-        processAttachments(listId, itemId, row, writer);
-        processFolder(listId, folder.substring(root.length()), writer);
-        writeMetadataAsContent(writer, metadata);
-        writer.finish();
-        log.exiting("SiteAdaptor", "getListItemDocContent");
+        processAttachments(listId, itemId, row);
+        processFolder(listId, folder.substring(root.length()));
+        writeMetadataAsContent(item, metadata);
+        log.exiting("SiteConnector", "getListItemDocContent");
         return;
       }
       String contentTypeId = row.getAttribute(OWS_CONTENTTYPEID_ATTRIBUTE);
@@ -2965,90 +2892,87 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           && contentTypeId.startsWith(CONTENTTYPEID_DOCUMENT_PREFIX)) {
         // This is a file (or "Document" in SharePoint-speak), so display its
         // contents.
-        metadataLength += addMetadata(
-            response, METADATA_OBJECT_TYPE, "Document");
+        addMetadata(METADATA_OBJECT_TYPE, "Document", metadata);
         if (canRespondWithNoContent) {
-          log.log(Level.FINER, "Document: Responding with 204 as Last-Modified "
-              + "is {0} and last access time is {1}",
-              new Object[] {lastModified, request.getLastAccessTime()});
-          response.respondNoContent();
-          log.exiting("SiteAdaptor", "getListItemDocContent");
+          log.log(
+              Level.FINER,
+              "Document: Responding with 204 as Last-Modified "
+                  + "is {0} and last access time is {1}",
+              new Object[] {lastModified, entry.getItemUpdatedTime()});
+          indexingService.updateItem(item, true);
+          log.exiting("SiteConnector", "getListItemDocContent");
           return;
         }
-        getFileDocContent(request, response, false);
+        getFileDocContent(entry, item, false);
       } else {
         // Some list item.
         URI displayPage = sharePointUrlToUri(l.defaultViewItemUrl);
         try {
-          response.setDisplayUrl(new URI(displayPage.getScheme(),
-              displayPage.getAuthority(), displayPage.getPath(),
-              "ID=" + itemId, null));
+          URI viewItemUri =
+              new URI(
+                  displayPage.getScheme(),
+                  displayPage.getAuthority(),
+                  displayPage.getPath(),
+                  "ID=" + itemId,
+                  null);
+          item.setViewUrl(viewItemUri.toString());
         } catch (URISyntaxException ex) {
           throw new IOException(ex);
         }
-        metadataLength += addMetadata(
-            response, METADATA_OBJECT_TYPE, ObjectType.LIST_ITEM.value());
+        addMetadata(METADATA_OBJECT_TYPE, ObjectType.LIST_ITEM.value(), metadata);
         if (canRespondWithNoContent) {
-          log.log(Level.FINER, "ListItem: Responding with 204 as Last-Modified"
-              + " is {0} and last access time is {1}",
-              new Object[] {lastModified, request.getLastAccessTime()});
-          response.respondNoContent();
-          log.exiting("SiteAdaptor", "getListItemDocContent");
+          log.log(
+              Level.FINER,
+              "Folder: Responding with 204 as Last-Modified "
+                  + "is {0} and last access time is {1}",
+              new Object[] {lastModified, entry.getItemUpdatedTime()});
+          indexingService.updateItem(item, true);
+          log.exiting("SiteConnector", "getListItemDocContent");
           return;
         }
-        HtmlResponseWriter writer
-            = createHtmlResponseWriter(response, metadataLength);
-        writer.start(request.getDocId(), ObjectType.LIST_ITEM, title);
-        processAttachments(listId, itemId, row, writer);
-        writeMetadataAsContent(writer, metadata);
-        writer.finish();
+        processAttachments(listId, itemId, row);
+        writeMetadataAsContent(item, metadata);
       }
-      log.exiting("SiteAdaptor", "getListItemDocContent");
+      log.exiting("SiteConnector", "getListItemDocContent");
     }
 
-    private void processAttachments(String listId, String itemId, Element row,
-        HtmlResponseWriter writer) throws IOException {
+    private void processAttachments(String listId, String itemId, Element row) throws IOException {
       String strAttachments = row.getAttribute(OWS_ATTACHMENTS_ATTRIBUTE);
       int attachments = (strAttachments == null || "".equals(strAttachments))
           ? 0 : Integer.parseInt(strAttachments);
       if (attachments > 0) {
-        writer.startSection(ObjectType.LIST_ITEM_ATTACHMENTS);
-        Item item
-            = siteDataClient.getContentListItemAttachments(listId, itemId);
+        Item item = siteDataClient.getContentListItemAttachments(listId, itemId);
+        List<PushEntry> entries = new ArrayList<>();
         for (Item.Attachment attachment : item.getAttachment()) {
-          writer.addLink(encodeDocId(attachment.getURL()), null);
+          entries.add(new PushEntry().setId(encodeDocId(attachment.getURL())));
         }
+        indexingService.push(entries);
       }
     }
 
-    /**
-     * Write out metadata as content so that snippets can be more helpful.
-     */
-    private void writeMetadataAsContent(HtmlResponseWriter writer,
-        Multimap<String, String> metadata) throws IOException {
-      Multimap<String, String> cleanedMetadata = TreeMultimap.create();
-      for (Map.Entry<String, String> me : metadata.entries()) {
-        String value = me.getValue();
-        if (value.startsWith("<") && value.endsWith(">")) {
-          // Assume it is HTML and remove the tags, since otherwise the HTML
-          // will be encoded and show up in snippets. If we assumed wrong, then
-          // we simply removed some content from showing up in snippets. In no
-          // way is this cleanup necessary for correctness.
-          value = stripHtml(value);
-        }
-        cleanedMetadata.put(me.getKey(), value);
-      }
-      writer.addMetadata(cleanedMetadata);
-    }
-
-    private boolean getAttachmentDocContent(Request request, Response response)
+    /** Write out metadata as content so that snippets can be more helpful. */
+    private void writeMetadataAsContent(
+        com.google.api.services.springboardindex.model.Item item, Multimap<String, String> metadata)
         throws IOException {
-      log.entering("SiteAdaptor", "getAttachmentDocContent", new Object[] {
-          request, response});
-      String url = request.getDocId().getUniqueId();
+      // TODO(tvartak) : Use appropriate column for Title
+      List<String> fields = new ArrayList<>(metadata.keySet());
+      ContentTemplate template =
+          new ContentTemplate.ContentTemplateBuilder()
+              .setTitle("Title")
+              .setLowContent(fields)
+              .build();
+      String generated = template.apply(metadata);
+      log.log(Level.INFO, "Updating item {0}", item);
+      indexingService.updateItemAndContent(
+          item, ByteArrayContent.fromString("text/html", generated), true);
+    }
+
+    private boolean getAttachmentDocContent(QueueEntry entry) throws IOException {
+      log.entering("SiteConnector", "getAttachmentDocContent", entry);
+      String url = entry.getId();
       if (!url.contains("/Attachments/")) {
         log.fine("Not an attachment: does not contain /Attachments/");
-        log.exiting("SiteAdaptor", "getAttachmentDocContent", false);
+        log.exiting("SiteConnector", "getAttachmentDocContent", false);
         return false;
       }
       String[] parts = url.split("/Attachments/", 2);
@@ -3056,7 +2980,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       parts = parts[1].split("/", 2);
       if (parts.length != 2) {
         log.fine("Could not separate attachment file name and list item id");
-        log.exiting("SiteAdaptor", "getAttachmentDocContent", false);
+        log.exiting("SiteConnector", "getAttachmentDocContent", false);
         return false;
       }
       String itemId = parts[0];
@@ -3064,23 +2988,23 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           + "listBase={0}, itemId={1}", new Object[] {listBase, itemId});
       if (!INTEGER_PATTERN.matcher(itemId).matches()) {
         log.fine("Item Id isn't an integer, so it isn't actually an id");
-        log.exiting("SiteAdaptor", "getAttachmentDocContent", false);
+        log.exiting("SiteConnector", "getAttachmentDocContent", false);
         return false;
       }
       String listRedirectLocation = httpClient.getRedirectLocation(
           spUrlToUri(listBase).toURL(),
-          authenticationHandler.getAuthenticationCookies(), adaptorUserAgent);
+          authenticationHandler.getAuthenticationCookies(), sharepointUserAgent);
       // if listRedirectLocation is null, use listBase as list url. This is
       // possible if list has no views defined.
       // if listRedirectLocation is not null, it should begin with listBase
-      // to be considered as valid list location else use listBase as listUrl. 
-      String listUrl 
-          = listRedirectLocation == null ? listBase
-          : listRedirectLocation.startsWith(listBase) 
-          ? listRedirectLocation : listBase;
+      // to be considered as valid list location else use listBase as listUrl.
+      String listUrl =
+          listRedirectLocation == null
+              ? listBase
+              : listRedirectLocation.startsWith(listBase) ? listRedirectLocation : listBase;
 
       log.log(Level.FINER, "List url {0}", listUrl);
-      Holder<String> listIdHolder = new Holder<String>();      
+      Holder<String> listIdHolder = new Holder<String>();
       boolean result = siteDataClient.getUrlSegments(listUrl,
           listIdHolder, null);
       // There is a possiblity that default view url for a list is empty but
@@ -3102,14 +3026,14 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
             listBase + "/" + itemId + "_.000", listIdHolder, null);
         if (!result) {
           log.fine("Could not get list id from list item url");
-          log.exiting("SiteAdaptor", "getAttachmentDocContent", false);
+          log.exiting("SiteConnector", "getAttachmentDocContent", false);
           return false;
         }
       }
       String listId = listIdHolder.value;
       if (listId == null) {
         log.fine("List URL does not point to a list");
-        log.exiting("SiteAdaptor", "getAttachmentDocContent", false);
+        log.exiting("SiteConnector", "getAttachmentDocContent", false);
         return false;
       }
       // We have verified that the part before /Attachments/ is a List. Since
@@ -3121,8 +3045,8 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       CachedWeb w = rareModCache.getWeb(siteDataClient);
       if (TrueFalseType.TRUE.equals(l.noIndex) || isWebNoIndex(w)) {
         log.fine("Document marked for NoIndex");
-        response.respondNotFound();
-        log.exiting("SiteAdaptor", "getAttachmentDocContent", true);
+        indexingService.deleteItem(entry.getId());
+        log.exiting("SiteConnector", "getAttachmentDocContent", true);
         return true;
       }
 
@@ -3132,7 +3056,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       String itemCount = data.getAttribute("ItemCount");
       if ("0".equals(itemCount)) {
         log.fine("Could not get parent list item as ItemCount is 0.");
-        log.exiting("SiteAdaptor", "getAttachmentDocContent", false);
+        log.exiting("SiteConnector", "getAttachmentDocContent", false);
         // Returing false here instead of returing 404 to avoid wrongly
         // identifying file documents as attachments when DocumentLibrary has
         // folder name Attachments. Returing false here would allow code
@@ -3140,8 +3064,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         return false;
       }
       Element row = getChildrenWithName(data, ROW_ELEMENT).get(0);
-      String scopeId
-          = row.getAttribute(OWS_SCOPEID_ATTRIBUTE).split(";#", 2)[1];
+      String scopeId = row.getAttribute(OWS_SCOPEID_ATTRIBUTE).split(";#", 2)[1];
       scopeId = scopeId.toLowerCase(Locale.ENGLISH);
 
       String strAttachments = row.getAttribute(OWS_ATTACHMENTS_ATTRIBUTE);
@@ -3152,52 +3075,36 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         // collection of documents in a Document Library. Therefore, we let the
         // code continue to try to determine if this is a File.
         log.fine("Parent list item has no child attachments");
-        log.exiting("SiteAdaptor", "getAttachmentDocContent", false);
+        log.exiting("SiteConnector", "getAttachmentDocContent", false);
         return false;
       }
+      com.google.api.services.springboardindex.model.Item item =
+          new com.google.api.services.springboardindex.model.Item();
+      item.setId(entry.getId());
 
       boolean allowAnonymousAccess = isAllowAnonymousReadForList(l)
           && scopeId.equals(l.scopeId.toLowerCase(Locale.ENGLISH))
           && isAllowAnonymousPeekForWeb(w)
           && (!isDenyAnonymousAccessOnVirtualServer());
       if (!allowAnonymousAccess) {
-        if (useFlatAcls) {
-          Scopes scopes = getFirstChildOfType(xml, Scopes.class);
-          Acl.Builder acl = null;
-          for (Scopes.Scope scope : scopes.getScope()) {
-            if (scope.getId().toLowerCase(Locale.ENGLISH).equals(scopeId)) {
-              acl = generateAcl(scope.getPermission(), LIST_ITEM_MASK);
-              break;
-            }
-          }
-          if (acl == null) {
-            throw new IOException("scope on list item is not available");
-          }
-          response.setAcl(acl.build());
-        } else {
-          String listItemUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
-          response.setAcl(new Acl.Builder()
-              .setInheritFrom(encodeDocId(listItemUrl))
-              .build());
-        }
+        String listItemUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
+        item.setInheritanceType(Acl.PARENT_OVERRIDE).setInheritFrom(encodeDocId(listItemUrl));
       }
-      response.addMetadata(METADATA_OBJECT_TYPE, "Attachment");
-      response.addMetadata(METADATA_PARENT_WEB_TITLE, w.webTitle);
-      response.addMetadata(METADATA_LIST_GUID, listId);
+
       // If the attachment doesn't exist, then this responds Not Found.
-      getFileDocContent(request, response, true);
-      log.exiting("SiteAdaptor", "getAttachmentDocContent", true);
+      getFileDocContent(entry, item, true);
+      log.exiting("SiteConnector", "getAttachmentDocContent", true);
       return true;
     }
 
     private Map<String, PrincipalInfo> resolvePrincipals(
         List<String> principalsToResolve) {
-      Map<String, PrincipalInfo> resolved
-          = new HashMap<String, PrincipalInfo>();
+      Map<String, PrincipalInfo> resolved = new HashMap<String, PrincipalInfo>();
       if (principalsToResolve.isEmpty()) {
         return resolved;
       }
-      ArrayOfString aos = new ArrayOfString();
+      com.microsoft.schemas.sharepoint.soap.people.ArrayOfString aos =
+          new com.microsoft.schemas.sharepoint.soap.people.ArrayOfString();
       aos.getString().addAll(principalsToResolve);
       ArrayOfPrincipalInfo resolvePrincipals = people.resolvePrincipals(
           aos, SPPrincipalType.ALL, false);
@@ -3208,19 +3115,21 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       // e.g. if login name from Policy is NT Authority\Local Service
       // returned account name is i:0#.w|NT Authority\Local Service
       for (int i = 0; i < principalsToResolve.size(); i++) {
-         resolved.put(principalsToResolve.get(i), principals.get(i));
+        resolved.put(principalsToResolve.get(i), principals.get(i));
       }
       return resolved;
     }
 
     private MemberIdMapping retrieveMemberIdMapping() throws IOException {
-      log.entering("SiteAdaptor", "retrieveMemberIdMapping");
+      log.entering("SiteConnector", "retrieveMemberIdMapping");
       Site site = siteDataClient.getContentSite();
       Map<Integer, Principal> map = new HashMap<Integer, Principal>();
       for (GroupMembership.Group group : site.getGroups().getGroup()) {
-        map.put(group.getGroup().getID(), new GroupPrincipal(
-            group.getGroup().getName(),
-            defaultNamespace + "_" + site.getMetadata().getURL()));
+        String sharepointLocalGroup =
+            getPrincipalName(
+                group.getGroup().getName(), defaultNamespace + "_" + site.getMetadata().getURL());
+        Principal localGroup = Acl.getExternalGroupPrincipal(sharepointLocalGroup);
+        map.put(group.getGroup().getID(), localGroup);
       }
       for (UserDescription user : site.getWeb().getUsers().getUser()) {
         Principal principal = userDescriptionToPrincipal(user);
@@ -3233,33 +3142,32 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         map.put(user.getID(), principal);
       }
       MemberIdMapping mapping = new MemberIdMapping(map);
-      log.exiting("SiteAdaptor", "retrieveMemberIdMapping", mapping);
+      log.exiting("SiteConnector", "retrieveMemberIdMapping", mapping);
       return mapping;
     }
 
-    private Map<GroupPrincipal, Collection<Principal>> computeMembersForGroups(
+    private Map<ExternalGroup, Collection<Principal>> computeMembersForGroups(
         GroupMembership groups) {
-      Map<GroupPrincipal, Collection<Principal>> defs
-          = new HashMap<GroupPrincipal, Collection<Principal>>();
+      Map<ExternalGroup, Collection<Principal>> defs =
+          new HashMap<ExternalGroup, Collection<Principal>>();
       for (GroupMembership.Group group : groups.getGroup()) {
-        GroupPrincipal groupPrincipal = new GroupPrincipal(
-            group.getGroup().getName(), defaultNamespace + "_" + siteUrl);
-        Collection<Principal> members = new LinkedList<Principal>();
-        // We always provide membership details, even for empty groups.
-        defs.put(groupPrincipal, members);
+        String sharepointLocalGroup =
+            getPrincipalName(group.getGroup().getName(), defaultNamespace + "_" + siteUrl);
+        List<Principal> members = new ArrayList<Principal>();
         if (group.getUsers() == null) {
-          continue;
-        }
-        for (UserDescription user : group.getUsers().getUser()) {
-          Principal principal = userDescriptionToPrincipal(user);
-          if (principal == null) {
-            log.log(Level.WARNING,
-                "Unable to determine login name. Skipping user with ID {0}",
-                user.getID());
-            continue;
+          for (UserDescription user : group.getUsers().getUser()) {
+            Principal principal = userDescriptionToPrincipal(user);
+            if (principal == null) {
+              log.log(
+                  Level.WARNING,
+                  "Unable to determine login name. Skipping user with ID {0}",
+                  user.getID());
+              continue;
+            }
+            members.add(principal);
           }
-          members.add(principal);
         }
+        defs.put(Acl.getExternalGroup(sharepointLocalGroup, members), members);
       }
       return defs;
     }
@@ -3272,35 +3180,34 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         return null;
       }
       if (isDomainGroup) {
-        return new GroupPrincipal(userName, defaultNamespace);
+        return Acl.getExternalGroupPrincipal(getPrincipalName(userName, defaultNamespace));
       } else {
-        return new UserPrincipal(userName, defaultNamespace);
+        return Acl.getExternalUserPrincipal(getPrincipalName(userName, defaultNamespace));
       }
     }
 
-    private MemberIdMapping retrieveSiteUserMapping()
-        throws IOException {
-      log.entering("SiteAdaptor", "retrieveSiteUserMapping");
-      GetUserCollectionFromSiteResponse.GetUserCollectionFromSiteResult result
-          = userGroup.getUserCollectionFromSite();
+    private MemberIdMapping retrieveSiteUserMapping() {
+      log.entering("SiteConnector", "retrieveSiteUserMapping");
+      GetUserCollectionFromSiteResponse.GetUserCollectionFromSiteResult result =
+          userGroup.getUserCollectionFromSite();
       Map<Integer, Principal> map = new HashMap<Integer, Principal>();
       MemberIdMapping mapping;
       if (result == null) {
         mapping = new MemberIdMapping(map);
-        log.exiting("SiteAdaptor", "retrieveSiteUserMapping", mapping);
+        log.exiting("SiteConnector", "retrieveSiteUserMapping", mapping);
         return mapping;
       }
-      GetUserCollectionFromSiteResult.GetUserCollectionFromSite siteUsers
-           = result.getGetUserCollectionFromSite();
+      GetUserCollectionFromSiteResult.GetUserCollectionFromSite siteUsers =
+          result.getGetUserCollectionFromSite();
       if (siteUsers.getUsers() == null) {
         mapping = new MemberIdMapping(map);
-        log.exiting("SiteAdaptor", "retrieveSiteUserMapping", mapping);
+        log.exiting("SiteConnector", "retrieveSiteUserMapping", mapping);
         return mapping;
       }
       for (User user : siteUsers.getUsers().getUser()) {
         boolean isDomainGroup = (user.getIsDomainGroup()
             == com.microsoft.schemas.sharepoint.soap.directory.TrueFalseType.TRUE);
-        
+
         String userName = getLoginNameForPrincipal(
             user.getLoginName(), user.getName(), isDomainGroup);
         if (userName == null) {
@@ -3310,46 +3217,33 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
           continue;
         }
         if (isDomainGroup) {
-          map.put((int) user.getID(),
-              new GroupPrincipal(userName, defaultNamespace));
+          map.put(
+              (int) user.getID(),
+              Acl.getExternalGroupPrincipal(getPrincipalName(userName, defaultNamespace)));
         } else {
-          map.put((int) user.getID(),
-              new UserPrincipal(userName, defaultNamespace));
+          map.put(
+              (int) user.getID(),
+              Acl.getExternalUserPrincipal(getPrincipalName(userName, defaultNamespace)));
         }
       }
       mapping = new MemberIdMapping(map);
-      log.exiting("SiteAdaptor", "retrieveSiteUserMapping", mapping);
+      log.exiting("SiteConnector", "retrieveSiteUserMapping", mapping);
       return mapping;
     }
 
-    private SiteAdaptor getAdaptorForUrl(String url) throws IOException {
-      log.entering("SiteAdaptor", "getAdaptorForUrl", url);
+    private SiteConnector getConnectorForUrl(String url) throws IOException {
+      log.entering("SiteConnector", "getConnectorForUrl", url);
       Holder<String> site = new Holder<String>();
       Holder<String> web = new Holder<String>();
       long result = siteDataClient.getSiteAndWeb(url, site, web);
 
       if (result != 0) {
-        log.exiting("SiteAdaptor", "getAdaptorForUrl", null);
+        log.exiting("SiteConnector", "getConnectorForUrl", null);
         return null;
       }
-      SiteAdaptor siteAdaptor = getSiteAdaptor(site.value, web.value);
-      log.exiting("SiteAdaptor", "getAdaptorForUrl", siteAdaptor);
-      return siteAdaptor;
-    }
-
-    private HtmlResponseWriter createHtmlResponseWriter(Response response)
-        throws IOException {
-      return createHtmlResponseWriter(response, 0);
-    }
-
-    private HtmlResponseWriter createHtmlResponseWriter(
-        Response response, long metadataLength) throws IOException {
-      response.setContentType("text/html; charset=utf-8");
-      // TODO(ejona): Get locale from request.
-      return new HtmlResponseWriter(response.getOutputStream(), CHARSET,
-          context.getDocIdEncoder(), Locale.ENGLISH,
-          maxIndexableSize - metadataLength, context.getDocIdPusher(),
-          executor);
+      SiteConnector siteConnector = getSiteConnector(site.value, web.value);
+      log.exiting("SiteConnector", "getConnectorForUrl", siteConnector);
+      return siteConnector;
     }
 
     public SiteDataClient getSiteDataClient() {
@@ -3395,8 +3289,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     public String getFirstHeaderWithName(String name) {
       String nameLowerCase = name.toLowerCase(Locale.ENGLISH);
       for (int i = 0; i < getHeaderCount(); i++) {
-        String headerNameLowerCase
-            = getHeaderName(i).toLowerCase(Locale.ENGLISH);
+        String headerNameLowerCase = getHeaderName(i).toLowerCase(Locale.ENGLISH);
         if (headerNameLowerCase.equals(nameLowerCase)) {
           return getHeaderValue(i);
         }
@@ -3450,13 +3343,16 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
      *
      * @return {@code null} if not found, {@code FileInfo} instance otherwise
      */
-    public FileInfo issueGetRequest(URL url, List<String> authenticationCookies,
-        String adaptorUserAgent, int maxRedirectsToFollow,
-        boolean performBrowserLeniency) throws IOException;
-    
-    public String getRedirectLocation(URL url,
-        List<String> authenticationCookies, String adaptorUserAgent)
+    public FileInfo issueGetRequest(
+        URL url,
+        List<String> authenticationCookies,
+        String sharepointUserAgent,
+        int maxRedirectsToFollow,
+        boolean performBrowserLeniency)
         throws IOException;
+
+    public String getRedirectLocation(
+        URL url, List<String> authenticationCookies, String sharepointUserAgent) throws IOException;
 
     public HttpURLConnection getHttpURLConnection(URL url) throws IOException;
   }
@@ -3464,7 +3360,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
   static class HttpClientImpl implements HttpClient {
     @Override
     public FileInfo issueGetRequest(URL url, List<String> authenticationCookies,
-        String adaptorUserAgent, int maxRedirectsToFollow,
+        String sharepointUserAgent, int maxRedirectsToFollow,
         boolean performBrowserLeniency) throws IOException {
       int redirectAttempt = 0;
       final URL initialRequest = url;
@@ -3487,12 +3383,12 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
                 "Not passing authentication cookies for {0}", url);
           }
         }
-        if (!"".equals(adaptorUserAgent)) {
-          conn.addRequestProperty("User-Agent", adaptorUserAgent);
+        if (!"".equals(sharepointUserAgent)) {
+          conn.addRequestProperty("User-Agent", sharepointUserAgent);
         }
         conn.setDoInput(true);
         conn.setDoOutput(false);
-        // Set follow redirects to true here if adaptor need not to handle
+        // Set follow redirects to true here if connector need not to handle
         // encoding of redirect URLs.
         conn.setInstanceFollowRedirects(!performBrowserLeniency);
         int responseCode = conn.getResponseCode();
@@ -3508,16 +3404,17 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
               responseCode >= HttpURLConnection.HTTP_BAD_REQUEST
               ? conn.getErrorStream() : conn.getInputStream();
           inputStream.close();
-          throw new IOException(String.format("Got status code %d for URL %s",
-                  responseCode, url));
+          throw new IOException(String.format("Got status code %d for URL %s", responseCode, url));
         }
         if (maxRedirectsToFollow < 0) {
           throw new AssertionError();
         }
         if ((maxRedirectsToFollow == 0)) {
-          throw new IOException(String.format("Got status code %d for url %s "
-                  + "but adaptor is configured to follow 0 redirects.",
-              responseCode, initialRequest));
+          throw new IOException(
+              String.format(
+                  "Got status code %d for url %s "
+                      + "but connector is configured to follow 0 redirects.",
+                  responseCode, initialRequest));
         }
         redirectAttempt++;
         String redirectLocation = conn.getHeaderField("Location");
@@ -3533,28 +3430,31 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
         url = encodeSharePointUrl(redirectLocation, performBrowserLeniency);
       } while (redirectAttempt <= maxRedirectsToFollow);
       if (conn.getResponseCode() != HttpURLConnection.HTTP_OK) {
-        throw new IOException(String.format("Got status code %d for initial "
-                + "request %s after %d redirect attempts.",
+        throw new IOException(
+            String.format(
+                "Got status code %d for initial " + "request %s after %d redirect attempts.",
                 conn.getResponseCode(), initialRequest, redirectAttempt));
       }
       String errorHeader = conn.getHeaderField("SharePointError");
       // SharePoint adds header SharePointError to response to indicate error
       // on SharePoint for requested URL.
-      // errorHeader = 2 if SharePoint rejects current request because 
+      // errorHeader = 2 if SharePoint rejects current request because
       // of current processing load
       // errorHeader = 0 for other errors on SharePoint server
-      
-      if (errorHeader != null) {            
+
+      if (errorHeader != null) {
         if ("2".equals(errorHeader)) {
-          throw new IOException("Got error 2 from SharePoint for URL [" + url 
-              + "]. Error Code 2 indicates SharePoint has rejected current "
-              + "request because of current processing load on SharePoint.");            
+          throw new IOException(
+              "Got error 2 from SharePoint for URL ["
+                  + url
+                  + "]. Error Code 2 indicates SharePoint has rejected current "
+                  + "request because of current processing load on SharePoint.");
         } else {
-          throw new IOException("Got error " + errorHeader 
-              + " from SharePoint for URL [" + url + "].");
+          throw new IOException(
+              "Got error " + errorHeader + " from SharePoint for URL [" + url + "].");
         }
       }
-      
+
       List<String> headers = new LinkedList<String>();
       // Start at 1 since index 0 is special.
       for (int i = 1;; i++) {
@@ -3572,8 +3472,8 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     }
 
     @Override
-    public String getRedirectLocation(URL url,
-        List<String> authenticationCookies, String adaptorUserAgent)
+    public String getRedirectLocation(
+        URL url, List<String> authenticationCookies, String sharepointUserAgent)
         throws IOException {
 
       // Handle Unicode. Java does not properly encode the GET.
@@ -3591,17 +3491,17 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
             conn.addRequestProperty("Cookie", cookie);
           }
         }
-        if (!"".equals(adaptorUserAgent)) {
-          conn.addRequestProperty("User-Agent", adaptorUserAgent);
+        if (!"".equals(sharepointUserAgent)) {
+          conn.addRequestProperty("User-Agent", sharepointUserAgent);
         }
         conn.setDoInput(true);
         conn.setDoOutput(false);
-        conn.setInstanceFollowRedirects(false);       
+        conn.setInstanceFollowRedirects(false);
         if (conn.getResponseCode() != HttpURLConnection.HTTP_MOVED_TEMP) {
           log.log(Level.WARNING,
               "Received response code {0} instead of 302 for URL {1}",
               new Object[]{conn.getResponseCode(), url});
-          return null;        
+          return null;
         }
         return conn.getHeaderField("Location");
       } finally {
@@ -3626,7 +3526,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     public SiteDataSoap newSiteData(String endpoint);
 
     public UserGroupSoap newUserGroup(String endpoint);
-    
+
     public PeopleSoap newPeople(String endpoint);
   }
 
@@ -3638,12 +3538,12 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
 
     public SoapFactoryImpl() {
       this.siteDataService = SiteDataClient.createSiteDataService();
-      this.userGroupService = Service.create(
-          UserGroupSoap.class.getResource("UserGroup.wsdl"),
-          new QName(XMLNS_DIRECTORY, "UserGroup"));
-      this.peopleService = Service.create(
-          PeopleSoap.class.getResource("People.wsdl"),
-          new QName(XMLNS, "People"));
+      this.userGroupService =
+          Service.create(
+              UserGroupSoap.class.getResource("/UserGroup.wsdl"),
+              new QName(XMLNS_DIRECTORY, "UserGroup"));
+      this.peopleService =
+          Service.create(PeopleSoap.class.getResource("/People.wsdl"), new QName(XMLNS, "People"));
     }
 
     private static String handleEncoding(String endpoint) {
@@ -3669,7 +3569,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     public PeopleSoap newPeople(String endpoint) {
       EndpointReference endpointRef = new W3CEndpointReferenceBuilder()
           .address(handleEncoding(endpoint)).build();
-      return peopleService.getPort(endpointRef, PeopleSoap.class);      
+      return peopleService.getPort(endpointRef, PeopleSoap.class);
     }
   }
 
@@ -3686,11 +3586,11 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     public void addPermitForHost(URL urlContainingHost) {
       permittedHosts.add(urlToHostString(urlContainingHost));
     }
-    
+
     private boolean isPermittedHost(URL toVerify) {
       return permittedHosts.contains(urlToHostString(toVerify));
     }
-    
+
 
     private String urlToHostString(URL url) {
       // If the port is missing (so that the default is used), we replace it
@@ -3698,8 +3598,10 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
       // to prevent being tricked into connecting to a different port (consider
       // being configured for https, but then getting tricked to use http and
       // evenything being in the clear).
-      return "" + url.getHost()
-          + ":" + (url.getPort() != -1 ? url.getPort() : url.getDefaultPort());
+      return ""
+          + url.getHost()
+          + ":"
+          + (url.getPort() != -1 ? url.getPort() : url.getDefaultPort());
     }
 
     @Override
@@ -3713,9 +3615,8 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     }
   }
 
-  /**
-   * As defined at http://msdn.microsoft.com/en-us/library/ee394878.aspx .
-   */
+  /** As defined at http://msdn.microsoft.com/en-us/library/ee394878.aspx . */
+  @SuppressWarnings("unused")
   private static class SPBasePermissions {
     public static final long EMPTYMASK= 0x0000000000000000;
     public static final long VIEWLISTITEMS= 0x0000000000000001;
@@ -3809,8 +3710,7 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
     }
   }
 
-  private class MemberIdsCacheLoader
-      extends AsyncCacheLoader<String, MemberIdMapping> {
+  private class MemberIdsCacheLoader extends AsyncCacheLoader<String, MemberIdMapping> {
     @Override
     protected Executor executor() {
       return executor;
@@ -3818,12 +3718,11 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
 
     @Override
     public MemberIdMapping load(String site) throws IOException {
-      return getSiteAdaptor(site, site).retrieveMemberIdMapping();
+      return getSiteConnector(site, site).retrieveMemberIdMapping();
     }
   }
 
-  private class SiteUserCacheLoader
-      extends AsyncCacheLoader<String, MemberIdMapping> {
+  private class SiteUserCacheLoader extends AsyncCacheLoader<String, MemberIdMapping> {
     @Override
     protected Executor executor() {
       return executor;
@@ -3831,15 +3730,20 @@ public class SharePointConnector extends AbstractAdaptor implements PollingIncre
 
     @Override
     public MemberIdMapping load(String site) throws IOException {
-      return getSiteAdaptor(site, site).retrieveSiteUserMapping();
+      return getSiteConnector(site, site).retrieveSiteUserMapping();
     }
   }
 
-  private static class CachedThreadPoolFactory
-      implements Callable<ExecutorService> {
+  private static class CachedThreadPoolFactory implements Callable<ExecutorService> {
     @Override
     public ExecutorService call() {
       return Executors.newCachedThreadPool();
     }
+  }
+
+  @Override
+  public void saveCheckpoint(boolean isShutdown) throws IOException, InterruptedException {
+    // TODO(tvartak): Auto-generated method stub
+
   }
 }

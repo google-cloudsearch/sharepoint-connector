@@ -14,10 +14,9 @@
 
 package com.google.enterprise.adaptor.sharepoint;
 
+import com.google.api.services.springboardindex.model.Principal;
 import com.google.common.collect.Interner;
 import com.google.common.collect.Interners;
-import com.google.enterprise.adaptor.Principal;
-
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;

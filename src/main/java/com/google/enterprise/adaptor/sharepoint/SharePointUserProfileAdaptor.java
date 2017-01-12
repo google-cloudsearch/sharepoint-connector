@@ -466,13 +466,12 @@ public class SharePointUserProfileAdaptor extends AbstractAdaptor
     
     public UserProfileServiceFactoryImpl() {
       URL urlUserProfileService =
-          UserProfileServiceSoap.class.getResource("UserProfileService.wsdl");
+          UserProfileServiceSoap.class.getResource("/UserProfileService.wsdl");
       QName qname = new QName(XMLNS, "UserProfileService");
       this.userProfileServiceSoap = Service.create(
           urlUserProfileService, qname);
       URL urlUserProfileChangeService =
-          UserProfileChangeServiceSoap.class.getResource(
-              "UserProfileChangeService.wsdl");
+          UserProfileChangeServiceSoap.class.getResource("/UserProfileChangeService.wsdl");
       QName qnameChange = new QName(XMLNS_CHANGE, "UserProfileChangeService");
       this.userProfileChangeServiceSoap = Service.create(
           urlUserProfileChangeService, qnameChange);

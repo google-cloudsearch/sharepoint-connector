@@ -15,28 +15,22 @@
 package com.google.enterprise.adaptor.sharepoint;
 
 import com.google.common.annotations.VisibleForTesting;
-
 import com.microsoft.schemas.sharepoint.soap.ContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.Item;
 import com.microsoft.schemas.sharepoint.soap.ItemData;
 import com.microsoft.schemas.sharepoint.soap.ObjectType;
 import com.microsoft.schemas.sharepoint.soap.SPContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.SPSite;
+import com.microsoft.schemas.sharepoint.soap.Scopes;
 import com.microsoft.schemas.sharepoint.soap.Site;
 import com.microsoft.schemas.sharepoint.soap.SiteDataSoap;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Node;
-
-import org.xml.sax.SAXException;
-
+import com.microsoft.schemas.sharepoint.soap.Xml;
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
-
 import javax.xml.XMLConstants;
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
@@ -52,6 +46,9 @@ import javax.xml.validation.SchemaFactory;
 import javax.xml.ws.Holder;
 import javax.xml.ws.Service;
 import javax.xml.ws.WebServiceException;
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
+import org.xml.sax.SAXException;
 
 class SiteDataClient {
   /** SharePoint's namespace. */
@@ -89,8 +86,7 @@ class SiteDataClient {
 
   static {
     try {
-      jaxbContext = JAXBContext.newInstance(
-          "com.microsoft.schemas.sharepoint.soap");
+      jaxbContext = JAXBContext.newInstance("com.microsoft.schemas.sharepoint.soap");
     } catch (JAXBException ex) {
       throw new RuntimeException("Could not initialize JAXBContext", ex);
     }
@@ -98,8 +94,8 @@ class SiteDataClient {
     try {
       DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
       dbf.setNamespaceAware(true);
-      Document doc = dbf.newDocumentBuilder()
-          .parse(SiteDataSoap.class.getResourceAsStream("SiteData.wsdl"));
+      Document doc =
+          dbf.newDocumentBuilder().parse(SiteDataSoap.class.getResourceAsStream("/SiteData.wsdl"));
       String schemaNs = XMLConstants.W3C_XML_SCHEMA_NS_URI;
       Node schemaNode = doc.getElementsByTagNameNS(schemaNs, "schema").item(0);
       schema = SchemaFactory.newInstance(schemaNs).newSchema(
@@ -428,8 +424,7 @@ class SiteDataClient {
 
   public static Service createSiteDataService() {
     return Service.create(
-        SiteDataSoap.class.getResource("SiteData.wsdl"),
-        new QName(XMLNS, "SiteData"));
+        SiteDataSoap.class.getResource("/SiteData.wsdl"), new QName(XMLNS, "SiteData"));
   }
 
   /**
