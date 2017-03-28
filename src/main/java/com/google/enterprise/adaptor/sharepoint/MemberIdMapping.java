@@ -21,10 +21,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Immutable lookup from identifier to name for users and groups.
- */
-class MemberIdMapping {
+/** Immutable lookup from identifier to name for users and groups. */
+public class MemberIdMapping {
   private static final Interner<Principal> interner
       = Interners.newWeakInterner();
 

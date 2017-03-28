@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 class FileInfo {
   /** Non-null contents. */
@@ -44,6 +45,24 @@ class FileInfo {
     FileHeader(String header, String value) {
       this.header = header;
       this.value = value;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof FileHeader)) {
+        return false;
+      }
+      FileHeader that = (FileHeader) o;
+      return Objects.equals(header, that.header) &&
+          Objects.equals(value, that.value);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(header, value);
     }
   }
 

@@ -26,10 +26,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 
-/**
- * Helper class to handle forms authentication.
- */
-abstract class FormsAuthenticationHandler {
+/** Helper class to handle forms authentication. */
+public abstract class FormsAuthenticationHandler {
   /** SharePoint's namespace. */
   private static final String XMLNS
       = "http://schemas.microsoft.com/sharepoint/soap/";

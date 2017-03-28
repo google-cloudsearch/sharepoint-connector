@@ -50,7 +50,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.xml.sax.SAXException;
 
-class SiteDataClient {
+public class SiteDataClient {
   /** SharePoint's namespace. */
   private static final String XMLNS
       = "http://schemas.microsoft.com/sharepoint/soap/";
@@ -77,12 +77,18 @@ class SiteDataClient {
   // Unused character range 4 : &#127; - &#159;
   private static final String UNUSED_CHAR_RANGE4 = "(1(2[7-9]|[3-5][0-9]))";
 
-  /**
-   * Pattern to match unused character code ranges causing XML parsing to fail.
-   */
-  private static final Pattern BINARY_UNUSED_CHAR_PATTERN 
-      = Pattern.compile("&#(" + UNUSED_CHAR_RANGE1 + "|" + UNUSED_CHAR_RANGE2 
-          + "|" + UNUSED_CHAR_RANGE3 + "|" + UNUSED_CHAR_RANGE4 + ");");
+  /** Pattern to match unused character code ranges causing XML parsing to fail. */
+  private static final Pattern BINARY_UNUSED_CHAR_PATTERN =
+      Pattern.compile(
+          "&#("
+              + UNUSED_CHAR_RANGE1
+              + "|"
+              + UNUSED_CHAR_RANGE2
+              + "|"
+              + UNUSED_CHAR_RANGE3
+              + "|"
+              + UNUSED_CHAR_RANGE4
+              + ");");
 
   static {
     try {
@@ -352,9 +358,15 @@ class SiteDataClient {
   @VisibleForTesting
   <T> T jaxbParse(String xml, Class<T> klass)
       throws XmlProcessingException {
+    return jaxbParse(xml, klass, xmlValidation);
+  }
 
-    // Unsupported character codes such as Unit separator &#31; sometimes 
-    // present in response XML, but it prevents the XML from being parsed. 
+  @VisibleForTesting
+  public static <T> T jaxbParse(String xml, Class<T> klass, boolean xmlValidation)
+      throws XmlProcessingException {
+
+    // Unsupported character codes such as Unit separator &#31; sometimes
+    // present in response XML, but it prevents the XML from being parsed.
     // Since GSA can not handle these characters we strip it out.
 
     xml = BINARY_UNUSED_CHAR_PATTERN.matcher(xml).replaceAll("");

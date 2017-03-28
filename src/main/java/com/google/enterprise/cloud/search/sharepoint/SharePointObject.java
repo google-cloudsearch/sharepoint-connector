@@ -72,6 +72,9 @@ public class SharePointObject extends GenericJson {
   }
 
   static SharePointObject parse(byte[] payload) throws IOException {
+    if (payload == null) {
+      return new SharePointObject();
+    }
     return parse(new String(payload, UTF_8));
   }
 
