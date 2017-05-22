@@ -1,4 +1,4 @@
-<ContentDatabase>
+<ContentDatabase xmlns="http://schemas.microsoft.com/sharepoint/soap/">
 <Metadata ChangeId="1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603"
  ID="{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}" />
 <Sites>

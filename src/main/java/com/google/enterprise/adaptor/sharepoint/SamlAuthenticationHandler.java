@@ -16,8 +16,6 @@ package com.google.enterprise.adaptor.sharepoint;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
-import com.google.enterprise.adaptor.IOHelper;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -145,7 +143,7 @@ public class SamlAuthenticationHandler extends FormsAuthenticationHandler {
         wout.flush();
         wout.close();
         InputStream in = connection.getInputStream();
-        String result = IOHelper.readInputStreamToString(in, CHARSET);
+        String result = readInputStreamToString(in, CHARSET);
         return new PostResponseInfo(result, connection.getHeaderFields());
       } finally {
         InputStream inputStream = connection.getResponseCode() >= 400
@@ -155,7 +153,14 @@ public class SamlAuthenticationHandler extends FormsAuthenticationHandler {
         }
       }
     }
+    
+    private String readInputStreamToString(InputStream in, Charset charset) {
+      // TODO(tvartak): Auto-generated method stub
+      return null;
+    }
   }
+  
+
 
   @VisibleForTesting
   public static class PostResponseInfo {

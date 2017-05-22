@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import javax.xml.ws.BindingProvider;
 import javax.xml.ws.handler.MessageContext;
 
@@ -100,6 +101,28 @@ class SharePointRequestContext {
 
     // Set request headers
     port.getRequestContext().put(MessageContext.HTTP_REQUEST_HEADERS, headers);
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+    SharePointRequestContext that = (SharePointRequestContext) o;
+    return socketTimeoutMillis == that.socketTimeoutMillis &&
+        readTimeoutMillis == that.readTimeoutMillis &&
+        Objects.equals(authenticationHandler, that.authenticationHandler) &&
+        Objects.equals(userAgent, that.userAgent) &&
+        Objects.equals(timeoutConfiguration, that.timeoutConfiguration);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(authenticationHandler, userAgent, timeoutConfiguration, socketTimeoutMillis,
+        readTimeoutMillis);
   }
 
   public static final class Builder {

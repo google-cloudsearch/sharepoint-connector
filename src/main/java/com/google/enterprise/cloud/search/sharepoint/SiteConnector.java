@@ -268,7 +268,7 @@ class SiteConnector {
       if ((necessaryPermissionMask & mask) != necessaryPermissionMask) {
         continue;
       }
-      Integer id = permission.getMemberid();
+      int id = permission.getMemberid();
       Principal principal = mapping.getPrincipal(id);
       if (principal == null) {
         log.log(

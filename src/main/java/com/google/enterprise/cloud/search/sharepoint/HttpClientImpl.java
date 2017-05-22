@@ -195,7 +195,7 @@ class HttpClientImpl implements HttpClient {
     }
   }
 
-  static final class Builder {
+  static class Builder {
     private int maxRedirectsAllowed;
     private boolean performBrowserLeniency;
     private SharePointRequestContext requestContext;

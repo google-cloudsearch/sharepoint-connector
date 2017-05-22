@@ -17,7 +17,6 @@ package com.google.enterprise.adaptor.sharepoint.experimental;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
-import com.google.enterprise.adaptor.Config;
 import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.HttpPostClient;
 import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.HttpPostClientImpl;
 import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.PostResponseInfo;

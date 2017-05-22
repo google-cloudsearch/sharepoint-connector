@@ -84,6 +84,7 @@ import com.microsoft.schemas.sharepoint.soap.directory.GetUserCollectionFromSite
 import com.microsoft.schemas.sharepoint.soap.directory.User;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.ArrayOfPrincipalInfo;
+import com.microsoft.schemas.sharepoint.soap.people.ArrayOfString;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PrincipalInfo;
 import com.microsoft.schemas.sharepoint.soap.people.SPPrincipalType;
@@ -1568,7 +1569,8 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
   }
 
   public static void main(String[] args) throws IOException, InterruptedException {
-    Application.main(new SharePointConnector(), args);
+    Application application = new Application.Builder(new SharePointConnector(), args).build();
+    application.start();
   }
 
   private SiteConnector getConnectorForDocId(QueueEntry entry) throws IOException {
@@ -2151,7 +2153,9 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
         adminFragment.setId(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT));
         adminFragment.setReaders(admins);
         if (!sharePointUrl.isSiteCollectionUrl()) {
-          adminFragment.setInheritanceType(Acl.PARENT_OVERRIDE).setInheritFrom(VIRTUAL_SERVER_ID);
+          adminFragment
+              .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString())
+              .setInheritFrom(VIRTUAL_SERVER_ID);
         } else {
           log.log(
               Level.INFO,
@@ -2178,7 +2182,7 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
       item.setId(entry.getId());
 
       if (!allowAnonymousAccess) {
-        item.setInheritanceType(Acl.PARENT_OVERRIDE);
+        item.setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString());
         final boolean includePermissions;
         if (isWebSiteCollection()) {
           includePermissions = true;
@@ -2285,18 +2289,19 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
 
         if (scopeId.equals(webScopeId)) {
           rootFolder.setInheritFrom(webUrl);
-          rootFolder.setInheritanceType(Acl.PARENT_OVERRIDE);
+          rootFolder.setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString());
         } else {
           List<Permission> permissions =
               l.getACL().getPermissions().getPermission();
           rootFolder
               .setReaders(generateAcl(permissions, LIST_ITEM_MASK))
               .setInheritFrom(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT))
-              .setInheritanceType(Acl.PARENT_OVERRIDE);
+              .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString());
 
         }
         indexingService.updateItem(rootFolder, true);
-        item.setInheritFrom(rootFolderDocId).setInheritanceType(Acl.PARENT_OVERRIDE);
+        item.setInheritFrom(rootFolderDocId)
+            .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString());
       }
 
       URI displayUri = sharePointUrlToUri(
@@ -2577,7 +2582,8 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
           new com.google.api.services.springboardindex.model.Item();
       item.setId(entry.getId());
       if (!allowAnonymousAccess) {
-        item.setInheritanceType(Acl.PARENT_OVERRIDE).setInheritFrom(parentId);
+        item.setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString())
+            .setInheritFrom(parentId);
       }
       getFileDocContent(entry, item, true);
       log.exiting("SiteConnector", "getAspxDocContent");
@@ -2768,7 +2774,8 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
                     .toLowerCase(Locale.ENGLISH);
           }
           if (scopeId.equals(parentScopeId)) {
-            item.setInheritanceType(Acl.PARENT_OVERRIDE).setInheritFrom(folderDocId);
+            item.setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString())
+                .setInheritFrom(folderDocId);
           } else {
             // We have to search for the correct scope within the scopes element.
             // The scope provided in the metadata is for the parent list, not for
@@ -2779,7 +2786,7 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
               if (scope.getId().toLowerCase(Locale.ENGLISH).equals(scopeId)) {
                 item.setReaders(generateAcl(scope.getPermission(), LIST_ITEM_MASK))
                     .setInheritFrom(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT))
-                    .setInheritanceType(Acl.PARENT_OVERRIDE);
+                    .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString());
                 hasAcl = true;
                 break;
               }
@@ -2803,7 +2810,7 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
           }
           item.setReaders(generateAcl(permission, LIST_ITEM_MASK))
               .setInheritFrom(getFragmentId(entry.getId(), fragmentName))
-              .setInheritanceType(Acl.AND_BOTH_PERMIT);
+              .setInheritanceType(Acl.InheritanceType.AND_BOTH_PERMIT.toString());
           int authorId = -1;
           String authorValue = row.getAttribute(OWS_AUTHOR_ATTRIBUTE);
           if (authorValue != null) {
@@ -2823,7 +2830,7 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
           namedResource
               .setReaders(readers)
               .setInheritFrom(getFragmentId(siteUrl, SITE_COLLECTION_ADMIN_FRAGMENT))
-              .setInheritanceType(Acl.PARENT_OVERRIDE);
+              .setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString());
           log.log(Level.INFO, "Updating item {0}", namedResource);
           indexingService.updateItem(namedResource, true);
         }
@@ -3088,7 +3095,8 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
           && (!isDenyAnonymousAccessOnVirtualServer());
       if (!allowAnonymousAccess) {
         String listItemUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
-        item.setInheritanceType(Acl.PARENT_OVERRIDE).setInheritFrom(encodeDocId(listItemUrl));
+        item.setInheritanceType(Acl.InheritanceType.PARENT_OVERRIDE.toString())
+            .setInheritFrom(encodeDocId(listItemUrl));
       }
 
       // If the attachment doesn't exist, then this responds Not Found.
@@ -3103,8 +3111,7 @@ public class SharePointConnector implements Connector, ItemRetriever, Incrementa
       if (principalsToResolve.isEmpty()) {
         return resolved;
       }
-      com.microsoft.schemas.sharepoint.soap.people.ArrayOfString aos =
-          new com.microsoft.schemas.sharepoint.soap.people.ArrayOfString();
+      ArrayOfString aos = new ArrayOfString();
       aos.getString().addAll(principalsToResolve);
       ArrayOfPrincipalInfo resolvePrincipals = people.resolvePrincipals(
           aos, SPPrincipalType.ALL, false);
