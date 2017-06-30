@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
@@ -127,7 +127,7 @@ class RareModificationCache {
       for (PolicyUser policyUser : vs.getPolicies().getPolicyUser()) {
         long deny = policyUser.getDenyMask().longValue();
         // If at least one necessary bit is masked, then deny user.
-        if ((SharePointConnector.LIST_ITEM_MASK & deny) != 0) {
+        if ((SiteConnector.LIST_ITEM_MASK & deny) != 0) {
           policyContainsDeny = true;
           break;
         }

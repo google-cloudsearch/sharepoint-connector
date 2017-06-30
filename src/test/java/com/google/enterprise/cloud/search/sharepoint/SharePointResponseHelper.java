@@ -5,23 +5,27 @@ import java.io.IOException;
 import java.io.InputStream;
 
 public class SharePointResponseHelper {
-  
+
   public static String getSiteCollectionResponse() {
     return loadTestResponse("sites-SiteCollection-sc.xml");
   }
-  
+
   public static String getWebResponse() {
     return loadTestResponse("sites-SiteCollection-s.xml");
   }
-  
+
   public static String getListResponse() {
     return loadTestResponse("sites-SiteCollection-Lists-CustomList-l.xml");
   }
-  
+
+  public static String getListItemResponse() {
+    return loadTestResponse("sites-SiteCollection-Lists-CustomList-2-li.xml");
+  }
+
   public static String getListRootFolderContentResponse() {
     return loadTestResponse("sites-SiteCollection-Lists-CustomList-f.xml");
   }
-  
+
   public static String loadTestResponse(String fileName) {
     try {
       return loadResourceAsString("spresponses/" + fileName);

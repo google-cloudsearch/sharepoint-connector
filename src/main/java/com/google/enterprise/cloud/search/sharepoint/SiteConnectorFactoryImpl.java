@@ -3,7 +3,6 @@ package com.google.enterprise.cloud.search.sharepoint;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.enterprise.adaptor.sharepoint.SiteDataClient;
 import com.microsoft.schemas.sharepoint.soap.SiteDataSoap;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;

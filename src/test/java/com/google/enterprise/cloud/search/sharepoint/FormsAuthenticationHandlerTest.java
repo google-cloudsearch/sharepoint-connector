@@ -12,15 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
-
+package com.google.enterprise.cloud.search.sharepoint;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExpectedException;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -29,6 +24,9 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.ExpectedException;
 
 public class FormsAuthenticationHandlerTest {
   
@@ -38,23 +36,25 @@ public class FormsAuthenticationHandlerTest {
   static class UnsupportedScheduledExecutor extends CallerRunsExecutor 
       implements ScheduledExecutorService {
 
-    public ScheduledFuture<?> schedule(Runnable command, long delay,
-        TimeUnit unit) {
+    @Override
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
       throw new UnsupportedOperationException();
     }
 
-    public <V> ScheduledFuture<V> schedule(Callable<V> callable, long delay,
-        TimeUnit unit) {
+    @Override
+    public <V> ScheduledFuture<V> schedule(Callable<V> callable, long delay, TimeUnit unit) {
       throw new UnsupportedOperationException();
     }
 
-    public ScheduledFuture<?> scheduleAtFixedRate(Runnable command,
-        long initialDelay, long period, TimeUnit unit) {
+    @Override
+    public ScheduledFuture<?> scheduleAtFixedRate(
+        Runnable command, long initialDelay, long period, TimeUnit unit) {
       throw new UnsupportedOperationException();
     }
 
-    public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command,
-        long initialDelay, long delay, TimeUnit unit) {
+    @Override
+    public ScheduledFuture<?> scheduleWithFixedDelay(
+        Runnable command, long initialDelay, long delay, TimeUnit unit) {
       throw new UnsupportedOperationException(); 
     }
     

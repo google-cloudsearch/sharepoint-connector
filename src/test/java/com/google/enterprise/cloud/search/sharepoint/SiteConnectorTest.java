@@ -1,21 +1,18 @@
 package com.google.enterprise.cloud.search.sharepoint;
 
 import static org.junit.Assert.assertEquals;
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.eq;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
-import com.google.api.services.springboardindex.model.ExternalGroup;
-import com.google.api.services.springboardindex.model.Principal;
+import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.common.collect.ImmutableList;
-import com.google.enterprise.adaptor.sharepoint.SiteDataClient;
 import com.google.enterprise.cloud.search.sharepoint.SiteConnector.SPBasePermissions;
-import com.google.enterprise.springboard.sdk.Acl;
+import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.microsoft.schemas.sharepoint.soap.ACL;
-import com.microsoft.schemas.sharepoint.soap.GroupDescription;
-import com.microsoft.schemas.sharepoint.soap.GroupMembership;
 import com.microsoft.schemas.sharepoint.soap.Permission;
 import com.microsoft.schemas.sharepoint.soap.PermissionsForACL;
+import com.microsoft.schemas.sharepoint.soap.Scopes.Scope;
 import com.microsoft.schemas.sharepoint.soap.Site;
 import com.microsoft.schemas.sharepoint.soap.SiteDataSoap;
 import com.microsoft.schemas.sharepoint.soap.TrueFalseType;
@@ -23,7 +20,6 @@ import com.microsoft.schemas.sharepoint.soap.UserDescription;
 import com.microsoft.schemas.sharepoint.soap.Users;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
-import com.microsoft.schemas.sharepoint.soap.Scopes.Scope;
 import com.microsoft.schemas.sharepoint.soap.directory.GetUserCollectionFromSiteResponse;
 import com.microsoft.schemas.sharepoint.soap.directory.User;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
@@ -115,72 +111,6 @@ public class SiteConnectorTest {
   }
 
   @Test
-  public void testComputeMembersForGroupsNullCheck() {
-    SiteConnector sc =
-        new SiteConnector.Builder("http://sp.com", "http://sp.com")
-            .setSiteDataClient(siteDataClient)
-            .setPeople(peopleSoap)
-            .setUserGroup(userGroupSoap)
-            .build();
-    thrown.expect(NullPointerException.class);
-    sc.computeMembersForGroups(null);
-  }
-
-  @Test
-  public void testComputeMembersForGroups() {
-    SiteConnector sc =
-        new SiteConnector.Builder("http://sp.com", "http://sp.com")
-            .setSiteDataClient(siteDataClient)
-            .setPeople(peopleSoap)
-            .setUserGroup(userGroupSoap)
-            .build();
-    AtomicInteger userIds = new AtomicInteger();
-    UserDescription user1 = createUser(userIds.incrementAndGet(), "DOMAIN\\user1", "User1");
-    UserDescription group1 = createGroup(userIds.incrementAndGet(), "DOMAIN\\group1", "Group 1");
-    UserDescription userInvalidLogin =
-        createUser(userIds.incrementAndGet(), "i:0:invalid", "invalid user");
-
-    GroupMembership.Group localGroup1 =
-        createLocalGroup(
-            userIds.incrementAndGet(), "TeamSite Owners", Collections.singletonList(group1));
-
-    GroupMembership.Group localGroup2 =
-        createLocalGroup(
-            userIds.incrementAndGet(),
-            "TeamSite Readers",
-            Arrays.asList(user1, group1, userInvalidLogin));
-
-    GroupMembership.Group localGroupEmpty =
-        createLocalGroup(
-            userIds.incrementAndGet(),
-            "TeamSite Empty",
-            Collections.singletonList(userInvalidLogin));
-
-    GroupMembership membership = new GroupMembership();
-    membership.getGroup().add(localGroup1);
-    membership.getGroup().add(localGroup2);
-    membership.getGroup().add(localGroupEmpty);
-    ExternalGroup externalGroup1 =
-        createExternalGroup(
-            "http://sp.com",
-            "TeamSite Owners",
-            Collections.singletonList(
-                Acl.getExternalGroupPrincipal(Acl.getPrincipalName("DOMAIN\\group1", "default"))));
-    ExternalGroup externalGroup2 =
-        createExternalGroup(
-            "http://sp.com",
-            "TeamSite Readers",
-            Arrays.asList(
-                Acl.getExternalUserPrincipal(Acl.getPrincipalName("DOMAIN\\user1", "default")),
-                Acl.getExternalGroupPrincipal(Acl.getPrincipalName("DOMAIN\\group1", "default"))));
-    ExternalGroup externalGroupEmpty =
-        createExternalGroup("http://sp.com", "TeamSite Empty", Collections.emptyList());
-    assertEquals(
-        Arrays.asList(externalGroup1, externalGroup2, externalGroupEmpty),
-        sc.computeMembersForGroups(membership));
-  }
-
-  @Test
   public void testGetWebAcls() throws IOException {
     // GDC_PSL\\spuser1
     Permission permSpUser1 = createPermission(2, SiteConnector.LIST_ITEM_MASK);
@@ -203,10 +133,9 @@ public class SiteConnectorTest {
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
             .build();
-    Principal spUser1 =
-        Acl.getExternalUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
+    Principal spUser1 = Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
     Principal teamSiteOwners =
-        Acl.getExternalGroupPrincipal(
+        Acl.getGroupPrincipal(
             Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
     assertEquals(Arrays.asList(spUser1, teamSiteOwners), sc.getWebAcls(web));
   }
@@ -280,15 +209,14 @@ public class SiteConnectorTest {
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
             .build();
-    Principal spUser1 =
-        Acl.getExternalUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
+    Principal spUser1 = Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
     Principal teamSiteOwners =
-        Acl.getExternalGroupPrincipal(
+        Acl.getGroupPrincipal(
             Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
     Principal admin =
-        Acl.getExternalUserPrincipal(Acl.getPrincipalName("GDC-PSL\\administrator", "default"));
+        Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\administrator", "default"));
     Principal group300 =
-        Acl.getExternalGroupPrincipal(Acl.getPrincipalName("group300@gdc-psl.com", "default"));
+        Acl.getGroupPrincipal(Acl.getPrincipalName("group300@gdc-psl.com", "default"));
     assertEquals(Arrays.asList(spUser1, teamSiteOwners, admin, group300), sc.getListAcl(list));
   }
 
@@ -310,10 +238,9 @@ public class SiteConnectorTest {
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
             .build();
-    Principal spUser1 =
-        Acl.getExternalUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
+    Principal spUser1 = Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
     Principal teamSiteOwners =
-        Acl.getExternalGroupPrincipal(
+        Acl.getGroupPrincipal(
             Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
     assertEquals(Arrays.asList(spUser1, teamSiteOwners), sc.getScopeAcl(scope));
   }
@@ -345,8 +272,8 @@ public class SiteConnectorTest {
     web.getUsers().getUser().addAll(Arrays.asList(user1, group1, userRegular, userInvalidLogin));
     List<Principal> expected =
         Arrays.asList(
-            Acl.getExternalUserPrincipal(Acl.getPrincipalName("DOMAIN\\user1Admin", "default")),
-            Acl.getExternalGroupPrincipal(Acl.getPrincipalName("DOMAIN\\group1Admin", "default")));
+            Acl.getUserPrincipal(Acl.getPrincipalName("DOMAIN\\user1Admin", "default")),
+            Acl.getGroupPrincipal(Acl.getPrincipalName("DOMAIN\\group1Admin", "default")));
     assertEquals(expected, sc.getSiteCollectionAdmins(web));
   }
 
@@ -391,13 +318,12 @@ public class SiteConnectorTest {
         new Acl.Builder()
             .setDeniedReaders(
                 Collections.singletonList(
-                    Acl.getExternalUserPrincipal(
-                        Acl.getPrincipalName("GDC-PSL\\spuser1", "default"))))
+                    Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"))))
             .setReaders(
                 Arrays.asList(
-                    Acl.getExternalGroupPrincipal(
+                    Acl.getGroupPrincipal(
                         Acl.getPrincipalName("NT AUTHORITY\\LOCAL SERVICE", "default")),
-                    Acl.getExternalUserPrincipal(
+                    Acl.getUserPrincipal(
                         Acl.getPrincipalName("GDC-PSL\\Administrator", "default"))))
             .build();
     assertEquals(expected, sc.getWebApplicationPolicyAcl(vs));
@@ -452,24 +378,6 @@ public class SiteConnectorTest {
     when(siteDataClient.getContentSite()).thenReturn(site);
   }
 
-  private ExternalGroup createExternalGroup(
-      String site, String groupName, List<Principal> members) {
-    return Acl.getExternalGroup(Acl.getPrincipalName(groupName, site), members);
-  }
-
-  private GroupMembership.Group createLocalGroup(
-      int id, String groupName, List<UserDescription> members) {
-    GroupMembership.Group outer = new GroupMembership.Group();
-    GroupDescription description = new GroupDescription();
-    description.setName(groupName);
-    description.setID(id);
-    outer.setGroup(description);
-    Users users = new Users();
-    users.getUser().addAll(members);
-    outer.setUsers(users);
-    return outer;
-  }
-
   private UserDescription createUser(int id, String login, String name) {
     return createUserDescription(id, login, name, TrueFalseType.FALSE);
   }
@@ -478,7 +386,8 @@ public class SiteConnectorTest {
     return createUserDescription(id, login, name, TrueFalseType.TRUE);
   }
 
-  private UserDescription createUserDescription(int id, String login, String name, TrueFalseType isGroup) {
+  private UserDescription createUserDescription(
+      int id, String login, String name, TrueFalseType isGroup) {
     UserDescription user = new UserDescription();
     user.setLoginName(login);
     user.setID(id);

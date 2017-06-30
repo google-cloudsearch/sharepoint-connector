@@ -13,7 +13,7 @@
 // limitations under the License.
 
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
 public class AuthenticationResult {
   private final String cookie;

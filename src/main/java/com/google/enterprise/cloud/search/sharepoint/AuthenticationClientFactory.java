@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
 
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
 import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationSoap;
 
 import java.io.IOException;

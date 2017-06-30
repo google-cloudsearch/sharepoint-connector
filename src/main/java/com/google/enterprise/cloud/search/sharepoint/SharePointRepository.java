@@ -1,32 +1,36 @@
 package com.google.enterprise.cloud.search.sharepoint;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+import static com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue.withValue;
 
 import com.google.api.client.http.AbstractInputStreamContent;
 import com.google.api.client.http.ByteArrayContent;
 import com.google.api.client.util.DateTime;
 import com.google.api.client.util.Strings;
-import com.google.api.services.springboardindex.model.ExternalGroup;
-import com.google.api.services.springboardindex.model.Item;
-import com.google.api.services.springboardindex.model.Principal;
-import com.google.api.services.springboardindex.model.PushEntry;
-import com.google.api.services.springboardindex.model.QueueEntry;
+import com.google.api.services.cloudsearch.v1.model.Item;
+import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
+import com.google.api.services.cloudsearch.v1.model.Principal;
+import com.google.api.services.cloudsearch.v1.model.PushItem;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteStreams;
-import com.google.enterprise.adaptor.sharepoint.FormsAuthenticationHandler;
-import com.google.enterprise.adaptor.sharepoint.SiteDataClient.Paginator;
-import com.google.enterprise.springboard.sdk.Acl;
-import com.google.enterprise.springboard.sdk.Acl.InheritanceType;
-import com.google.enterprise.springboard.sdk.Config;
-import com.google.enterprise.springboard.sdk.InvalidConfigurationException;
-import com.google.enterprise.springboard.sdk.template.ApiOperation;
-import com.google.enterprise.springboard.sdk.template.ApiOperations;
-import com.google.enterprise.springboard.sdk.template.ClosableIterable;
-import com.google.enterprise.springboard.sdk.template.IncrementalChanges;
-import com.google.enterprise.springboard.sdk.template.Repository;
-import com.google.enterprise.springboard.sdk.template.RepositoryDoc;
-import com.google.enterprise.springboard.sdk.template.RepositoryException;
+import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.Paginator;
+import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
+import com.google.enterprise.cloudsearch.sdk.RepositoryException;
+import com.google.enterprise.cloudsearch.sdk.config.Configuration;
+import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
+import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
+import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
+import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointClosableIterable;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.ClosableIterable;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.Repository;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryContext;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryDoc;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabases;
 import com.microsoft.schemas.sharepoint.soap.ItemData;
@@ -50,7 +54,6 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -88,6 +91,8 @@ public class SharePointRepository implements Repository {
   private static final String OWS_SERVERURL_ATTRIBUTE = "ows_ServerUrl";
   /** The last time metadata or content was modified. */
   private static final String OWS_MODIFIED_ATTRIBUTE = "ows_Modified";
+  /** The time metadata or content was created. */
+  private static final String OWS_CREATED_ATTRIBUTE = "ows_Created";
   /**
    * Row attribute guaranteed to be in ListItem responses. See
    * http://msdn.microsoft.com/en-us/library/dd929205.aspx . Provides scope id used for permissions.
@@ -106,7 +111,7 @@ public class SharePointRepository implements Repository {
   /** Provides the number of attachments the list item has. */
   private static final String OWS_ATTACHMENTS_ATTRIBUTE = "ows_Attachments";
   /**
-   * Row attribute that contains a hierarchial hex number that describes the type of object. See
+   * Row attribute that contains a hierarchical hex number that describes the type of object. See
    * http://msdn.microsoft.com/en-us/library/aa543822.aspx for more information about content type
    * IDs.
    */
@@ -117,6 +122,11 @@ public class SharePointRepository implements Repository {
 
   static final String VIRTUAL_SERVER_ID = "ROOT_NEW";
   static final String SITE_COLLECTION_ADMIN_FRAGMENT = "admin";
+
+  private static final String DEFAULT_USER_NAME =
+      System.getProperty("os.name").contains("Windows") ? "" : null;
+  private static final String DEFAULT_PASSWORD =
+      System.getProperty("os.name").contains("Windows") ? "" : null;
 
   private static final TimeZone gmt = TimeZone.getTimeZone("GMT");
   /** RFC 822 date format, as updated by RFC 1123. */
@@ -133,6 +143,12 @@ public class SharePointRepository implements Repository {
         df.setTimeZone(gmt);
         return df;
       });
+  private final ThreadLocal<DateFormat> createdDateFormat =
+      ThreadLocal.withInitial(() -> {
+            DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ENGLISH);
+            df.setTimeZone(gmt);
+            return df;
+          });
   private final ThreadLocal<DateFormat> listLastModifiedDateFormat =
       ThreadLocal.withInitial(() -> {
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss'Z'", Locale.ENGLISH);
@@ -201,18 +217,18 @@ public class SharePointRepository implements Repository {
   private SiteConnectorFactory siteConnectorFactory;
   private SharePointConfiguration sharepointConfiguration;
   private NtlmAuthenticator ntlmAuthenticator;
-  // TODO(tvratak) : Add support for authentication handler implementations.
+  // TODO(tvartak) : Add support for authentication handler implementations.
   private FormsAuthenticationHandler authenticationHandler = null;
   private boolean performBrowserLeniency;
   private HttpClient httpClient;
-  
+
   private final HttpClientImpl.Builder httpClientBuilder;
   private final SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
 
   SharePointRepository() {
     this(new HttpClientImpl.Builder(), new SiteConnectorFactoryImpl.Builder());
   }
-  
+
   @VisibleForTesting
   SharePointRepository(
       HttpClientImpl.Builder httpClientBuilder,
@@ -222,75 +238,20 @@ public class SharePointRepository implements Repository {
   }
 
   @Override
-  public Map<String, String> getDefaults() {
-    Map<String, String> defaultConfig = new HashMap<String, String>();
-    defaultConfig.put("sharepoint.server", "");
-    // When running on Windows, Windows Authentication can log us in.
-    defaultConfig.put(
-        "sharepoint.username", System.getProperty("os.name").contains("Windows") ? "" : null);
-    defaultConfig.put(
-        "sharepoint.password", System.getProperty("os.name").contains("Windows") ? "" : null);
-    // On any particular SharePoint instance, we expect that at least some
-    // responses will not pass xml validation. We keep the option around to
-    // allow us to improve the schema itself, but also allow enable users to
-    // enable checking as a form of debugging.
-    defaultConfig.put("sharepoint.xmlValidation", "false");
-    defaultConfig.put("connector.namespace", "Default");
-    // When running against ADFS authentication, set this to ADFS endpoint.
-    defaultConfig.put("sharepoint.sts.endpoint", "");
-    // When running against ADFS authentication, set this to realm value.
-    // Normally realm value is either http://sharepointurl/_trust or
-    // urn:sharepointenv:com format. You can use
-    // Get-SPTrustedIdentityTokenIssuer to get "DefaultProviderRealm" value
-    defaultConfig.put("sharepoint.sts.realm", "");
-    // You can override default value of http://sharepointurl/_trust by
-    // specifying this property.
-    defaultConfig.put("sharepoint.sts.trustLocation", "");
-    // You can override default value of
-    // http://sharepointurl/_layouts/Authenticate.aspx by specifying this
-    // property.
-    defaultConfig.put("sharepoint.sts.login", "");
-    // Set this to true when using Live authentication.
-    defaultConfig.put("sharepoint.useLiveAuthentication", "false");
-    // Set this to specific user-agent value to be used by connector while making
-    // request to SharePoint
-    defaultConfig.put("sharepoint.userAgent", "");
-    // Set this to true when you want to index only single site collection
-    defaultConfig.put("sharepoint.siteCollectionOnly", "");
-    // Set this to positive integer value to configure maximum number of
-    // URL redirects allowed to download document contents.
-    defaultConfig.put("connector.maxRedirectsToFollow", "");
-    // Set this to true when connector needs to encode redirect urls and perform
-    // browser leniency for handling unsupported characters in urls.
-    defaultConfig.put("connector.lenientUrlRulesAndCustomRedirect", "true");
-    defaultConfig.put("sidLookup.host", "");
-    defaultConfig.put("sidLookup.port", "3268");
-    defaultConfig.put("sidLookup.username", "");
-    defaultConfig.put("sidLookup.password", "");
-    defaultConfig.put("sidLookup.method", "standard");
-    // Set this to static factory method name which will return
-    // custom SamlHandshakeManager object
-    defaultConfig.put("customSamlManager.configPrefix", "customSamlManager");
-    defaultConfig.put("sharepoint.customSamlManager", "");
-    defaultConfig.put("sharepoint.webservices.socketTimeoutSecs", "30");
-    defaultConfig.put("sharepoint.webservices.readTimeOutSecs", "180");
-    return Collections.unmodifiableMap(defaultConfig);
-  }
-
-  @Override
-  public void init(Config config) {
-    checkNotNull(config);
-    String sharePointServer = config.getValue("sharepoint.server");
+  public void init(RepositoryContext repositoryContext) throws RepositoryException {
+    checkState(Configuration.isInitialized(), "config should be initailized");
+    String sharePointServer = Configuration.getString("sharepoint.server", null).get();
     performBrowserLeniency =
-        Boolean.parseBoolean(config.getValue("connector.lenientUrlRulesAndCustomRedirect"));
-    String username = config.getValue("sharepoint.username");
-    String password = config.getValue("sharepoint.password");
+        Configuration.getBoolean("connector.lenientUrlRulesAndCustomRedirect", true).get();
+    String username = Configuration.getString("sharepoint.username", DEFAULT_USER_NAME).get();
+    String password = Configuration.getString("sharepoint.password", DEFAULT_PASSWORD).get();
     ntlmAuthenticator = new NtlmAuthenticator(username, password);
     try {
       SharePointUrl configuredUrl = buildSharePointUrl(sharePointServer);
       sharepointConfiguration =
           new SharePointConfiguration.Builder(configuredUrl)
-              .setSharePointSiteCollectionOnly(config.getValue("sharepoint.siteCollectionOnly"))
+              .setSharePointSiteCollectionOnly(
+                  Configuration.getString("sharepoint.siteCollectionOnly", "").get())
               .build();
       ntlmAuthenticator.addPermitForHost(configuredUrl.toURL());
     } catch (Exception e) {
@@ -300,12 +261,13 @@ public class SharePointRepository implements Repository {
       // Unfortunately, this is a JVM-wide modification.
       Authenticator.setDefault(ntlmAuthenticator);
     }
-    String sharepointUserAgent = config.getValue("sharepoint.userAgent").trim();
+    String sharepointUserAgent = Configuration.getString("sharepoint.userAgent", "").get().trim();
     int socketTimeoutMillis =
-        Integer.parseInt(config.getValue("sharepoint.webservices.socketTimeoutSecs")) * 1000;
+        Configuration.getInteger("sharepoint.webservices.socketTimeoutSecs", 30).get() * 1000;
     int readTimeOutMillis =
-        Integer.parseInt(config.getValue("sharepoint.webservices.readTimeOutSecs")) * 1000;
-    boolean xmlValidation = Boolean.parseBoolean(config.getValue("sharepoint.xmlValidation"));
+        Configuration.getInteger("sharepoint.webservices.readTimeOutSecs", 180).get() * 1000;
+
+    boolean xmlValidation = Configuration.getBoolean("sharepoint.xmlValidation", false).get();
     SharePointRequestContext requestContext = new SharePointRequestContext.Builder()
         .setAuthenticationHandler(authenticationHandler)
         .setSocketTimeoutMillis(socketTimeoutMillis)
@@ -326,52 +288,45 @@ public class SharePointRepository implements Repository {
   }
 
   @Override
-  public ClosableIterable<ApiOperation> getIds() throws RepositoryException {
+  public CheckpointClosableIterable getIds(byte[] checkpoint) throws RepositoryException {
     log.entering("SharePointConnector", "traverse");
     ClosableIterable<ApiOperation> toReturn =
         sharepointConfiguration.isSiteCollectionUrl()
             ? getDocIdsSiteCollectionOnly()
             : getDocIdsVirtualServer();
     log.exiting("SharePointConnector", "traverse");
-    return toReturn;
+    return new CheckpointClosableIterable(toReturn);
   }
 
   @Override
-  public IncrementalChanges getChanges(byte[] checkpoint) {
-    // TODO(tvartak): Auto-generated method stub
+  public CheckpointClosableIterable getChanges(byte[] checkpoint) {
     return null;
   }
 
   @Override
-  public ClosableIterable<ApiOperation> getAllDocs() {
-    // TODO(tvartak): Auto-generated method stub
+  public CheckpointClosableIterable getAllDocs(byte[] checkpoint) {
     return null;
   }
 
   @Override
-  public ApiOperation getDoc(QueueEntry entry) throws RepositoryException {
-    checkNotNull(entry);
+  public ApiOperation getDoc(Item item) throws RepositoryException {
+    checkNotNull(item);
     try {
-      SharePointObject object = SharePointObject.parse(entry.decodePayload());
+      SharePointObject object = SharePointObject.parse(item.decodePayload());
       String objectType = object.getObjectType();
       if (!object.isValid()) {
-        //throw new RepositoryException("Invalid Object Type " + objectType);
         log.log(
             Level.WARNING,
             "Invalid SharePoint Objecct {0} on entry {1}",
-            new Object[] {object, entry});
-        throw new RepositoryException("Invalid payload");
-        //return ApiOperations.deleteItem(entry.getId());
+            new Object[] {object, item});
+        throw new RepositoryException.Builder().setErrorMessage("Invalid payload").build();
       }
 
       if (SharePointObject.NAMED_RESOURCE.equals(objectType)) {
         // Do not process named resource here.
-        PushEntry notModified =
-            new PushEntry()
-                .setId(entry.getId())
-                .setKind("notModified")
-                .encodePayload(object.encodePayload());
-        return ApiOperations.pushEntries(Collections.singletonList(notModified));
+        PushItem notModified =
+            new PushItem().setType("NOT_MODIFIED").encodePayload(object.encodePayload());
+        return new PushItems.Builder().addPushItem(item.getName(), notModified).build();
       }
 
       if (SharePointObject.VIRTUAL_SERVER.equals(objectType)) {
@@ -380,42 +335,41 @@ public class SharePointRepository implements Repository {
 
       SiteConnector siteConnector;
       try {
-        siteConnector = getConnectorForDocId(entry.getId());
+        siteConnector = getConnectorForDocId(item.getName());
       } catch (URISyntaxException e) {
         throw new IOException(e);
       }
       if (siteConnector == null) {
-        return ApiOperations.deleteItem(entry.getId());
+        return ApiOperations.deleteItem(item.getName());
       }
 
       if (SharePointObject.SITE_COLLECTION.equals(objectType)) {
-        return getSiteCollectionDocContent(entry, siteConnector, object);
+        return getSiteCollectionDocContent(item, siteConnector, object);
       }
       if (SharePointObject.WEB.equals(objectType)) {
-        return getWebDocContent(entry, siteConnector, object);
+        return getWebDocContent(item, siteConnector, object);
       }
       if (SharePointObject.LIST.equals(objectType)) {
-        return getListDocContent(entry, siteConnector, object);
+        return getListDocContent(item, siteConnector, object);
       }
       if (SharePointObject.LIST_ITEM.equals(objectType)) {
-        return getListItemDocContent(entry, siteConnector, object);
+        return getListItemDocContent(item, siteConnector, object);
       }
       if (SharePointObject.ATTACHMENT.equals(objectType)) {
-        return getAttachmentDocContent(entry, siteConnector, object);
+        return getAttachmentDocContent(item, siteConnector, object);
       }
-      PushEntry notModified =
-          new PushEntry()
-              .setId(entry.getId())
-              .setKind("notModified")
+      PushItem notModified =
+          new PushItem()
+              .setType("notModified")
               .encodePayload(object.encodePayload());
-      return ApiOperations.pushEntries(Collections.singletonList(notModified));
+      return new PushItems.Builder().addPushItem(item.getName(), notModified).build();
     } catch (IOException e) {
-      throw new RepositoryException(e);
+      throw buildRepositoryExceptionFromIOException(e);
     }
   }
 
   @Override
-  public boolean exists(QueueEntry entry) {
+  public boolean exists(Item item) {
     return false;
   }
 
@@ -474,9 +428,8 @@ public class SharePointRepository implements Repository {
       List<ApiOperation> operations = new ArrayList<ApiOperation>();
       SharePointObject vsObject =
           new SharePointObject.Builder(SharePointObject.VIRTUAL_SERVER).build();
-      PushEntry pushEntry =
-          new PushEntry().setId(VIRTUAL_SERVER_ID).encodePayload(vsObject.encodePayload());
-      operations.add(ApiOperations.pushEntries(Collections.singletonList(pushEntry)));
+      PushItem pushItem = new PushItem().encodePayload(vsObject.encodePayload());
+      operations.add(new PushItems.Builder().addPushItem(VIRTUAL_SERVER_ID, pushItem).build());
       SiteConnector vsConnector =
           getSiteConnector(
               sharepointConfiguration.getVirtualServerUrl(),
@@ -506,24 +459,11 @@ public class SharePointRepository implements Repository {
             log.log(Level.WARNING, "Error parsing site url", e);
             continue;
           }
-
-          SiteConnector siteConnector = getSiteConnector(siteString, siteString);
-          Site site;
-          try {
-            site = siteConnector.getSiteDataClient().getContentSite();
-          } catch (IOException ex) {
-            log.log(Level.WARNING, "Failed to get local groups for site: "
-                + siteString, ex);
-            continue;
-          }
-          Collection<ExternalGroup> siteGroups =
-              siteConnector.computeMembersForGroups(site.getGroups());
-          siteGroups.forEach((group) -> operations.add(ApiOperations.updateExternalGroup(group)));
         }
       }
       return ApiOperations.wrapAsClosableIterable(operations.iterator());
     } catch (IOException e) {
-      throw new RepositoryException(e);
+      throw buildRepositoryExceptionFromIOException(e);
     }
   }
 
@@ -543,14 +483,11 @@ public class SharePointRepository implements Repository {
               .setSiteId(site.getMetadata().getID())
               .setWebId(site.getMetadata().getID())
               .build();
-      PushEntry pushEntry =
-          new PushEntry().setId(siteCollectionUrl).encodePayload(siteCollection.encodePayload());
-      operations.add(ApiOperations.pushEntries(Collections.singletonList(pushEntry)));
-      Collection<ExternalGroup> siteGroups = scConnector.computeMembersForGroups(site.getGroups());
-      siteGroups.forEach((group) -> operations.add(ApiOperations.updateExternalGroup(group)));
+      PushItem pushEntry = new PushItem().encodePayload(siteCollection.encodePayload());
+      operations.add(new PushItems.Builder().addPushItem(siteCollectionUrl, pushEntry).build());
       return ApiOperations.wrapAsClosableIterable(operations.iterator());
     } catch (IOException e) {
-      throw new RepositoryException(e);
+      throw buildRepositoryExceptionFromIOException(e);
     }
   }
 
@@ -561,13 +498,11 @@ public class SharePointRepository implements Repository {
               sharepointConfiguration.getVirtualServerUrl(),
               sharepointConfiguration.getVirtualServerUrl());
       VirtualServer vs = vsConnector.getSiteDataClient().getContentVirtualServer();
-      Acl webApplicationPolicy = vsConnector.getWebApplicationPolicyAcl(vs);
 
-      com.google.api.services.springboardindex.model.Item item =
-          new com.google.api.services.springboardindex.model.Item();
-      item.setId(VIRTUAL_SERVER_ID);
-      webApplicationPolicy.applyTo(item);
-      List<PushEntry> sites = new ArrayList<>();
+      IndexingItemBuilder itemBuilder =
+          new IndexingItemBuilder(VIRTUAL_SERVER_ID)
+              .setAcl(vsConnector.getWebApplicationPolicyAcl(vs));
+      RepositoryDoc.Builder docBuilder = new RepositoryDoc.Builder().setItem(itemBuilder.build());
       for (ContentDatabases.ContentDatabase cdcd : vs.getContentDatabases().getContentDatabase()) {
         try {
           ContentDatabase cd =
@@ -583,82 +518,85 @@ public class SharePointRepository implements Repository {
                       .setSiteId(site.getID())
                       .setWebId(site.getID())
                       .build();
-              sites.add(
-                  new PushEntry()
-                      .setId(vsConnector.encodeDocId(siteUrl))
-                      .encodePayload(siteCollection.encodePayload()));
+              docBuilder.addChildId(
+                  vsConnector.encodeDocId(siteUrl),
+                  new PushItem().encodePayload(siteCollection.encodePayload()));
             }
           }
         } catch (IOException ex) {
           log.log(Level.WARNING, "Error retriving sites from content database " + cdcd.getID(), ex);
         }
       }
-      return new RepositoryDoc.Builder().setItem(item).setChildIds(sites).build();
+
+      return docBuilder.build();
     } catch (IOException e) {
-      throw new RepositoryException(e);
+      throw buildRepositoryExceptionFromIOException(e);
     }
   }
 
+  private static RepositoryException buildRepositoryExceptionFromIOException(IOException e) {
+    return new RepositoryException.Builder().setCause(e).build();
+  }
+
   private ApiOperation getSiteCollectionDocContent(
-      QueueEntry entry,
+      Item polledItem,
       SiteConnector scConnector,
       @SuppressWarnings("unused") SharePointObject siteCollection)
       throws IOException {
     List<ApiOperation> batchRequest = new ArrayList<ApiOperation>();
     Site site = scConnector.getSiteDataClient().getContentSite();
-    Collection<ExternalGroup> siteGroups = scConnector.computeMembersForGroups(site.getGroups());
-    siteGroups.forEach((group) -> batchRequest.add(ApiOperations.updateExternalGroup(group)));
-
     Web rootWeb = scConnector.getSiteDataClient().getContentWeb();
     List<Principal> admins = scConnector.getSiteCollectionAdmins(rootWeb);
     Acl.Builder siteAdmins = new Acl.Builder().setReaders(admins);
-    Item item = new Item().setId(entry.getId());
-    List<PushEntry> entries = new ArrayList<>();
-    String siteAdminFragmentId = Acl.fragmentId(entry.getId(), SITE_COLLECTION_ADMIN_FRAGMENT);
+    String siteAdminFragmentId =
+        Acl.fragmentId(polledItem.getName(), SITE_COLLECTION_ADMIN_FRAGMENT);
     SharePointObject siteAdminObject =
         new SharePointObject.Builder(SharePointObject.NAMED_RESOURCE)
             .setSiteId(site.getMetadata().getID())
             .setObjectId(site.getMetadata().getID())
             .setUrl(siteAdminFragmentId)
             .build();
-    entries.add(
-        new PushEntry().setId(siteAdminFragmentId).encodePayload(siteAdminObject.encodePayload()));
     if (!sharepointConfiguration.isSiteCollectionUrl()) {
       siteAdmins.setInheritFrom(VIRTUAL_SERVER_ID);
       siteAdmins.setInheritanceType(InheritanceType.PARENT_OVERRIDE);
+    }
+    Item adminFragmentItem =
+        siteAdmins
+            .build()
+            .createFragmentItemOf(polledItem.getName(), SITE_COLLECTION_ADMIN_FRAGMENT)
+            .encodePayload(siteAdminObject.encodePayload());
+    RepositoryDoc adminFragment = new RepositoryDoc.Builder().setItem(adminFragmentItem).build();
+    batchRequest.add(adminFragment);
+    IndexingItemBuilder item = new IndexingItemBuilder(polledItem.getName());
+    if (!sharepointConfiguration.isSiteCollectionUrl()) {
       item.setContainer(VIRTUAL_SERVER_ID);
     }
-
     Acl itemAcl =
         new Acl.Builder()
             .setReaders(scConnector.getWebAcls(rootWeb))
             .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-            .setInheritFrom(entry.getId(), SITE_COLLECTION_ADMIN_FRAGMENT)
+            .setInheritFrom(siteAdminFragmentId)
             .build();
-    itemAcl.applyTo(item);
-    entries.addAll(getChildWebEntries(scConnector, site.getMetadata().getID(), rootWeb));
-    entries.addAll(getChildListEntries(scConnector, site.getMetadata().getID(), rootWeb));
-
-    RepositoryDoc doc =
-        new RepositoryDoc.Builder()
-            .setItem(item)
-            .setAclFragments(
-                Collections.singletonMap(SITE_COLLECTION_ADMIN_FRAGMENT, siteAdmins.build()))
-            .setChildIds(entries)
-            .build();
-    batchRequest.add(doc);
+    item.setAcl(itemAcl);
+    RepositoryDoc.Builder doc = new RepositoryDoc.Builder().setItem(item.build());
+    addChildIdsToRepositoryDoc(
+        doc, getChildWebEntries(scConnector, site.getMetadata().getID(), rootWeb));
+    addChildIdsToRepositoryDoc(
+        doc, getChildListEntries(scConnector, site.getMetadata().getID(), rootWeb));
+    batchRequest.add(doc.build());
     return ApiOperations.batch(batchRequest.iterator());
   }
 
   private ApiOperation getWebDocContent(
-      QueueEntry entry, SiteConnector scConnector, SharePointObject webObject) throws IOException {
+      Item polledItem, SiteConnector scConnector, SharePointObject webObject) throws IOException {
     Web currentWeb = scConnector.getSiteDataClient().getContentWeb();
     String parentWebUrl = scConnector.getWebParentUrl();
     SiteConnector parentSiteConnector = getSiteConnector(scConnector.getSiteUrl(), parentWebUrl);
     Web parentWeb = parentSiteConnector.getSiteDataClient().getContentWeb();
     boolean inheritPermissions =
         Objects.equals(currentWeb.getMetadata().getScopeID(), parentWeb.getMetadata().getScopeID());
-    Item item = new Item().setId(entry.getId()).setContainer(parentWebUrl);
+    IndexingItemBuilder item =
+        new IndexingItemBuilder(polledItem.getName()).setContainer(parentWebUrl);
     Acl.Builder aclBuilder = new Acl.Builder().setInheritanceType(InheritanceType.PARENT_OVERRIDE);
     if (inheritPermissions) {
       aclBuilder.setInheritFrom(parentWebUrl);
@@ -666,28 +604,25 @@ public class SharePointRepository implements Repository {
       aclBuilder.setReaders(scConnector.getWebAcls(currentWeb));
       aclBuilder.setInheritFrom(scConnector.getSiteUrl(), SITE_COLLECTION_ADMIN_FRAGMENT);
     }
-    aclBuilder.build().applyTo(item);
-    List<PushEntry> entries = new ArrayList<>();
-    entries.addAll(getChildWebEntries(scConnector, webObject.getSiteId(), currentWeb));
-    entries.addAll(getChildListEntries(scConnector, webObject.getSiteId(), currentWeb));
-    return new RepositoryDoc.Builder().setItem(item).setChildIds(entries).build();
+    item.setAcl(aclBuilder.build());
+    RepositoryDoc.Builder doc = new RepositoryDoc.Builder();
+    addChildIdsToRepositoryDoc(
+        doc, getChildWebEntries(scConnector, webObject.getSiteId(), currentWeb));
+    addChildIdsToRepositoryDoc(
+        doc, getChildListEntries(scConnector, webObject.getSiteId(), currentWeb));
+    return doc.setItem(item.build()).build();
   }
 
   private ApiOperation getListDocContent(
-      QueueEntry entry, SiteConnector scConnector, SharePointObject listObject) throws IOException {
+      Item polledItem, SiteConnector scConnector, SharePointObject listObject) throws IOException {
     com.microsoft.schemas.sharepoint.soap.List l =
         scConnector.getSiteDataClient().getContentList(listObject.getListId());
     String rootFolder = l.getMetadata().getRootFolder();
     if (Strings.isNullOrEmpty(rootFolder)) {
-      return ApiOperations.deleteItem(entry.getId());
+      return ApiOperations.deleteItem(polledItem.getName());
     }
 
     String rootFolderDocId = scConnector.encodeDocId(rootFolder);
-    Item rootFolderItem =
-        new Item()
-            .setId(rootFolderDocId)
-            .setId(rootFolderDocId)
-            .setContainer(scConnector.getWebUrl());
     SharePointObject rootFolderPayload =
         new SharePointObject.Builder(SharePointObject.NAMED_RESOURCE)
             .setSiteId(listObject.getSiteId())
@@ -696,8 +631,12 @@ public class SharePointRepository implements Repository {
             .setListId(listObject.getListId())
             .setObjectId(listObject.getListId())
             .build();
-    PushEntry rootFolderEntry =
-        new PushEntry().setId(rootFolderDocId).encodePayload(rootFolderPayload.encodePayload());
+    Item rootFolderItem =
+        new Item()
+            .setName(rootFolderDocId)
+            .setMetadata(new ItemMetadata().setContainerName(scConnector.getWebUrl()))
+            .encodePayload(rootFolderPayload.encodePayload());
+
     Web w = scConnector.getSiteDataClient().getContentWeb();
     String scopeId = l.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
     String webScopeId = w.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
@@ -713,9 +652,10 @@ public class SharePointRepository implements Repository {
     RepositoryDoc listRootDoc =
         new RepositoryDoc.Builder()
             .setItem(rootFolderItem)
-            .setChildIds(Collections.singletonList(rootFolderEntry))
             .build();
-    Item listItem = new Item().setId(entry.getId()).setContainer(rootFolderDocId);
+    ItemMetadata metadata = new ItemMetadata();
+    metadata.setContainerName(rootFolderDocId);
+    Item listItem = new Item().setName(polledItem.getName());
     new Acl.Builder()
         .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
         .setInheritFrom(rootFolderDocId)
@@ -726,34 +666,36 @@ public class SharePointRepository implements Repository {
             ? l.getMetadata().getRootFolder()
             : l.getMetadata().getDefaultViewUrl();
     String displayUrl = scConnector.encodeDocId(path);
-    listItem.setViewUrl(displayUrl);
+    metadata.setSourceRepositoryUrl(displayUrl);
     String lastModified = l.getMetadata().getLastModified();
     try {
-      listItem.setContentModifiedTime(
-          new DateTime(listLastModifiedDateFormat.get().parse(lastModified)));
+      metadata.setUpdateTime(
+          new DateTime(listLastModifiedDateFormat.get().parse(lastModified)).toStringRfc3339());
     } catch (ParseException ex) {
       log.log(Level.INFO, "Could not parse LastModified: {0}", lastModified);
     }
-    RepositoryDoc listDoc =
-        new RepositoryDoc.Builder()
-            .setItem(listItem)
-            .setChildIds(processFolder(scConnector, listObject.getListId(), "", listObject))
-            .build();
-    List<ApiOperation> operations = Arrays.asList(listRootDoc, listDoc);
+    listItem.setMetadata(metadata);
+    RepositoryDoc.Builder listDoc = new RepositoryDoc.Builder().setItem(listItem);
+    addChildIdsToRepositoryDoc(
+        listDoc, processFolder(scConnector, listObject.getListId(), "", listObject));
+    List<ApiOperation> operations = Arrays.asList(listRootDoc, listDoc.build());
     return ApiOperations.batch(operations.iterator());
   }
 
   private ApiOperation getListItemDocContent(
-      QueueEntry entry, SiteConnector scConnector, SharePointObject itemObject) throws IOException {
+      Item polledItem, SiteConnector scConnector, SharePointObject itemObject) throws IOException {
     Holder<String> listId = new Holder<String>();
     Holder<String> itemId = new Holder<String>();
-    boolean result = scConnector.getSiteDataClient().getUrlSegments(entry.getId(), listId, itemId);
+    boolean result =
+        scConnector.getSiteDataClient().getUrlSegments(polledItem.getName(), listId, itemId);
     if (!result || itemId.value == null || listId.value == null) {
       log.log(
-          Level.WARNING, "Unable to identify itemId for Item {0}. Deleting item", entry.getId());
-      return ApiOperations.deleteItem(entry.getId());
+          Level.WARNING,
+          "Unable to identify itemId for Item {0}. Deleting item",
+          polledItem.getName());
+      return ApiOperations.deleteItem(polledItem.getName());
     }
-    Item item = new Item().setId(entry.getId());
+    IndexingItemBuilder itemBuilder = new IndexingItemBuilder(polledItem.getName());
     ItemData i = scConnector.getSiteDataClient().getContentItem(listId.value, itemId.value);
 
     Xml xml = i.getXml();
@@ -765,9 +707,21 @@ public class SharePointRepository implements Repository {
       log.log(Level.FINE, "No last modified information for list item");
     } else {
       try {
-        item.setContentModifiedTime(new DateTime(modifiedDateFormat.get().parse(modifiedString)));
+        itemBuilder.setLastModified(
+            withValue(new DateTime(modifiedDateFormat.get().parse(modifiedString))));
       } catch (ParseException ex) {
         log.log(Level.INFO, "Could not parse ows_Modified: {0}", modifiedString);
+      }
+    }
+    String createdString = row.getAttribute(OWS_CREATED_ATTRIBUTE);
+    if (createdString == null) {
+      log.log(Level.FINE, "No created time information for list item");
+    } else {
+      try {
+        itemBuilder.setCreationTime(
+            withValue(new DateTime(createdDateFormat.get().parse(createdString))));
+      } catch (ParseException ex) {
+        log.log(Level.INFO, "Could not parse ows_Created: {0}", createdString);
       }
     }
     com.microsoft.schemas.sharepoint.soap.List l =
@@ -781,7 +735,7 @@ public class SharePointRepository implements Repository {
     // extract the site/list/path. Path relative to host, even though it
     // doesn't have a leading '/'.
     String folderDocId = scConnector.encodeDocId("/" + rawFileDirRef.split(";#", 2)[1]);
-    item.setContainer(folderDocId);
+    itemBuilder.setContainer(folderDocId);
     String rootFolderDocId = scConnector.encodeDocId(l.getMetadata().getRootFolder());
     // If the parent is a list, folderDocId will be same as
     // rootFolderDocId. If inheritance chain is not
@@ -844,10 +798,10 @@ public class SharePointRepository implements Repository {
         }
       }
       if (!hasAcl) {
-        throw new IOException("Unable to find permission scope for item: " + entry.getId());
+        throw new IOException("Unable to find permission scope for item: " + polledItem.getName());
       }
     }
-    aclBuilder.build().applyTo(item);
+    itemBuilder.setAcl(aclBuilder.build());
     // This should be in the form of "1234;#0". We want to extract the 0.
     String type = row.getAttribute(OWS_FSOBJTYPE_ATTRIBUTE).split(";#", 2)[1];
     boolean isFolder = "1".equals(type);
@@ -876,23 +830,25 @@ public class SharePointRepository implements Repository {
                 displayPage.getPath(),
                 "RootFolder=" + serverUrl,
                 null);
-        item.setViewUrl(displayUrl.toString());
+        itemBuilder.setUrl(withValue(displayUrl.toString()));
       } catch (URISyntaxException ex) {
         throw new IOException(ex);
       }
-      List<PushEntry> entries =
-          processAttachments(scConnector, listId.value, itemId.value, row, itemObject);
-      entries.addAll(
+      RepositoryDoc.Builder doc = new RepositoryDoc.Builder();
+      addChildIdsToRepositoryDoc(
+          doc, processAttachments(scConnector, listId.value, itemId.value, row, itemObject));
+      addChildIdsToRepositoryDoc(
+          doc,
           processFolder(scConnector, listId.value, folder.substring(root.length()), itemObject));
-      return
-          new RepositoryDoc.Builder().setItem(item).setChildIds(entries).build();
+      return doc.setItem(itemBuilder.build()).build();
     }
     String contentTypeId = row.getAttribute(OWS_CONTENTTYPEID_ATTRIBUTE);
     boolean isDocument =
         contentTypeId != null && contentTypeId.startsWith(CONTENTTYPEID_DOCUMENT_PREFIX);
-    RepositoryDoc.Builder docBuilder = new RepositoryDoc.Builder().setItem(item);
+    RepositoryDoc.Builder docBuilder = new RepositoryDoc.Builder();
     if (isDocument) {
-      docBuilder.setContent(getFileContent(entry.getId(), item, true));
+      docBuilder.setContent(
+          getFileContent(polledItem.getName(), itemBuilder, true), ContentFormat.RAW);
     } else {
       String defaultViewItemUrl = scConnector.encodeDocId(l.getMetadata().getDefaultViewItemUrl());
       try {
@@ -904,17 +860,19 @@ public class SharePointRepository implements Repository {
                 displayPage.getPath(),
                 "ID=" + itemId.value,
                 null);
-        item.setViewUrl(viewItemUri.toString());
+        itemBuilder.setUrl(withValue(viewItemUri.toString()));
       } catch (URISyntaxException e) {
         throw new IOException(e);
       }
-      List<PushEntry> entries =
-          processAttachments(scConnector, listId.value, itemId.value, row, itemObject);
-      docBuilder.setChildIds(entries);
-      docBuilder.setContent(
-          ByteArrayContent.fromString("text/plain", "List Item " + entry.getId()));
+      addChildIdsToRepositoryDoc(
+          docBuilder, processAttachments(scConnector, listId.value, itemId.value, row, itemObject));
     }
-    return docBuilder.build();
+    return docBuilder.setItem(itemBuilder.build()).build();
+  }
+
+  private static void addChildIdsToRepositoryDoc(
+      RepositoryDoc.Builder docBuilder, Map<String, PushItem> entries) {
+    entries.entrySet().stream().forEach(e -> docBuilder.addChildId(e.getKey(), e.getValue()));
   }
 
   private SharePointUrl buildSharePointUrl(String url) throws URISyntaxException {
@@ -924,15 +882,17 @@ public class SharePointRepository implements Repository {
   }
 
   private ApiOperation getAttachmentDocContent(
-      QueueEntry entry, SiteConnector scConnector, SharePointObject itemObject) throws IOException {
+      Item polledItem, SiteConnector scConnector, SharePointObject itemObject) throws IOException {
     Holder<String> listId = new Holder<String>();
     Holder<String> itemId = new Holder<String>();
     boolean result =
         scConnector.getSiteDataClient().getUrlSegments(itemObject.getItemId(), listId, itemId);
     if (!result || itemId.value == null || listId.value == null) {
       log.log(
-          Level.WARNING, "Unable to identify itemId for Item {0}. Deleting item", entry.getId());
-      return ApiOperations.deleteItem(entry.getId());
+          Level.WARNING,
+          "Unable to identify itemId for Item {0}. Deleting item",
+          polledItem.getName());
+      return ApiOperations.deleteItem(polledItem.getName());
     }
     ItemData itemData = scConnector.getSiteDataClient().getContentItem(listId.value, itemId.value);
     Xml xml = itemData.getXml();
@@ -941,11 +901,11 @@ public class SharePointRepository implements Repository {
     String itemCount = data.getAttribute("ItemCount");
     if ("0".equals(itemCount)) {
       log.fine("Could not get parent list item as ItemCount is 0.");
-      // Returing false here instead of returing 404 to avoid wrongly
+      // Returning false here instead of returning 404 to avoid wrongly
       // identifying file documents as attachments when DocumentLibrary has
-      // folder name Attachments. Returing false here would allow code
+      // folder name Attachments. Returning false here would allow code
       // to see if this document was a regular file in DocumentLibrary.
-      return ApiOperations.deleteItem(entry.getId());
+      return ApiOperations.deleteItem(polledItem.getName());
     }
     Element row = getChildrenWithName(data, ROW_ELEMENT).get(0);
     String strAttachments = row.getAttribute(OWS_ATTACHMENTS_ATTRIBUTE);
@@ -958,22 +918,25 @@ public class SharePointRepository implements Repository {
       // collection of documents in a Document Library. Therefore, we let the
       // code continue to try to determine if this is a File.
       log.fine("Parent list item has no child attachments");
-      return ApiOperations.deleteItem(entry.getId());
+      return ApiOperations.deleteItem(polledItem.getName());
     }
-    Item attachmentItem = new Item().setId(entry.getId());
-    AbstractInputStreamContent content = getFileContent(entry.getId(), attachmentItem, false);
+    IndexingItemBuilder itemBuilder = new IndexingItemBuilder(polledItem.getName());
+    AbstractInputStreamContent content = getFileContent(polledItem.getName(), itemBuilder, false);
     Acl acl =
         new Acl.Builder()
             .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
             .setInheritFrom(itemObject.getItemId())
             .build();
-    acl.applyTo(attachmentItem);
-    return new RepositoryDoc.Builder().setItem(attachmentItem).setContent(content).build();
+    itemBuilder.setAcl(acl);
+    return new RepositoryDoc.Builder()
+        .setItem(itemBuilder.build())
+        .setContent(content, ContentFormat.RAW)
+        .build();
   }
 
-  private List<PushEntry> getChildListEntries(
+  private Map<String, PushItem> getChildListEntries(
       SiteConnector scConnector, String siteId, Web parentWeb) throws IOException {
-    List<PushEntry> entries = new ArrayList<PushEntry>();
+    Map<String, PushItem> entries = new HashMap<>();
     if (parentWeb.getLists() != null) {
       for (Lists.List list : parentWeb.getLists().getList()) {
         if ("".equals(list.getDefaultViewUrl())) {
@@ -994,15 +957,15 @@ public class SharePointRepository implements Repository {
                 .setListId(list.getID())
                 .setObjectId(list.getID())
                 .build();
-        entries.add(new PushEntry().setId(listUrl).encodePayload(payload.encodePayload()));
+        entries.put(listUrl, new PushItem().encodePayload(payload.encodePayload()));
       }
     }
     return entries;
   }
 
-  private List<PushEntry> getChildWebEntries(
+  private Map<String, PushItem> getChildWebEntries(
       SiteConnector scConnector, String siteId, Web parentweb) throws IOException {
-    List<PushEntry> entries = new ArrayList<>();
+    Map<String, PushItem> entries = new HashMap<>();
     if (parentweb.getWebs() != null) {
       for (Webs.Web web : parentweb.getWebs().getWeb()) {
         String childWebUrl = getCanonicalUrl(web.getURL());
@@ -1014,22 +977,21 @@ public class SharePointRepository implements Repository {
                 .setUrl(childWebUrl)
                 .setObjectId(web.getID())
                 .build();
-        entries.add(new PushEntry().setId(childWebUrl).encodePayload(payload.encodePayload()));
+        entries.put(childWebUrl, new PushItem().encodePayload(payload.encodePayload()));
       }
     }
     return entries;
   }
 
-  private List<PushEntry> processFolder(
+  private Map<String, PushItem> processFolder(
       SiteConnector scConnector, String listGuid, String folderPath, SharePointObject reference)
       throws IOException {
     Paginator<ItemData> folderPaginator =
         scConnector.getSiteDataClient().getContentFolderChildren(listGuid, folderPath);
     ItemData folder;
-    List<PushEntry> entries = new ArrayList<PushEntry>();
+    Map<String, PushItem> entries = new HashMap<>();
     while ((folder = folderPaginator.next()) != null) {
       Xml xml = folder.getXml();
-
       Element data = getFirstChildWithName(xml, DATA_ELEMENT);
       for (Element row : getChildrenWithName(data, ROW_ELEMENT)) {
         String rowUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
@@ -1042,20 +1004,20 @@ public class SharePointRepository implements Repository {
                 .setUrl(itemId)
                 .setObjectId("item")
                 .build();
-        entries.add(new PushEntry().setId(itemId).encodePayload(payload.encodePayload()));
+        entries.put(itemId, new PushItem().encodePayload(payload.encodePayload()));
       }
     }
     return entries;
   }
 
-  private List<PushEntry> processAttachments(
+  private Map<String, PushItem> processAttachments(
       SiteConnector scConnector,
       String listId,
       String itemId,
       Element row,
       SharePointObject reference)
       throws IOException {
-    List<PushEntry> entries = new ArrayList<>();
+    Map<String, PushItem> entries = new HashMap<>();
     String strAttachments = row.getAttribute(OWS_ATTACHMENTS_ATTRIBUTE);
     int attachments =
         (strAttachments == null || "".equals(strAttachments))
@@ -1076,17 +1038,16 @@ public class SharePointRepository implements Repository {
 
         String attachmentUrl = scConnector.encodeDocId(attachment.getURL());
         payloadBuilder.setUrl(attachmentUrl).setObjectId(attachmentUrl);
-        entries.add(
-            new PushEntry()
-                .setId(attachmentUrl)
-                .encodePayload(payloadBuilder.build().encodePayload()));
+        entries.put(
+            attachmentUrl, new PushItem().encodePayload(payloadBuilder.build().encodePayload()));
       }
     }
     return entries;
   }
 
   private AbstractInputStreamContent getFileContent(
-      String fileUrl, Item item, boolean setLastModified) throws IOException {
+      String fileUrl, IndexingItemBuilder item, boolean setLastModified) throws IOException {
+    checkNotNull(item, "item can not be null");
     SharePointUrl sharepointFileUrl;
     try {
       sharepointFileUrl =
@@ -1094,22 +1055,23 @@ public class SharePointRepository implements Repository {
     } catch (URISyntaxException e) {
       throw new IOException(e);
     }
-    item.setViewUrl(fileUrl);
+    item.setUrl(withValue(fileUrl));
     String filePath = sharepointFileUrl.getURI().getPath();
     String fileExtension = "";
     if (filePath.lastIndexOf('.') > 0) {
       fileExtension = filePath.substring(filePath.lastIndexOf('.')).toLowerCase(Locale.ENGLISH);
     }
     FileInfo fi = httpClient.issueGetRequest(sharepointFileUrl.toURL());
+    String contentType;
     if (FILE_EXTENSION_TO_MIME_TYPE_MAPPING.containsKey(fileExtension)) {
-      String contentType = FILE_EXTENSION_TO_MIME_TYPE_MAPPING.get(fileExtension);
+      contentType = FILE_EXTENSION_TO_MIME_TYPE_MAPPING.get(fileExtension);
       log.log(
           Level.FINER,
           "Overriding content type as {0} for file extension {1}",
           new Object[] {contentType, fileExtension});
       item.setMimeType(contentType);
     } else {
-      String contentType = fi.getFirstHeaderWithName("Content-Type");
+      contentType = fi.getFirstHeaderWithName("Content-Type");
       if (contentType != null) {
         String lowerType = contentType.toLowerCase(Locale.ENGLISH);
         if (MIME_TYPE_MAPPING.containsKey(lowerType)) {
@@ -1121,14 +1083,14 @@ public class SharePointRepository implements Repository {
     String lastModifiedString = fi.getFirstHeaderWithName("Last-Modified");
     if (lastModifiedString != null && setLastModified) {
       try {
-        item.setContentModifiedTime(
-            new DateTime(dateFormatRfc1123.get().parse(lastModifiedString)));
+        item.setLastModified(
+            withValue(new DateTime(dateFormatRfc1123.get().parse(lastModifiedString))));
       } catch (ParseException ex) {
         log.log(Level.INFO, "Could not parse Last-Modified: {0}", lastModifiedString);
       }
     }
     AbstractInputStreamContent content =
-        new ByteArrayContent(item.getMimeType(), ByteStreams.toByteArray(fi.getContents()));
+        new ByteArrayContent(contentType, ByteStreams.toByteArray(fi.getContents()));
     try {
       fi.getContents().close();
     } catch (IOException e) {
@@ -1192,7 +1154,7 @@ public class SharePointRepository implements Repository {
     return siteConnectorFactory.getInstance(site, web);
   }
 
-  //Remove trailing slash from URLs as SharePoint doesn't like trailing slash
+  // Remove trailing slash from URLs as SharePoint doesn't like trailing slash
   // in SiteData.GetUrlSegments
   private static String getCanonicalUrl(String url) {
     if (!url.endsWith("/")) {
@@ -1224,7 +1186,7 @@ public class SharePointRepository implements Repository {
       // with the default port for the protocol in order to prevent being able
       // to prevent being tricked into connecting to a different port (consider
       // being configured for https, but then getting tricked to use http and
-      // evenything being in the clear).
+      // everything being in the clear).
       return ""
           + url.getHost()
           + ":"

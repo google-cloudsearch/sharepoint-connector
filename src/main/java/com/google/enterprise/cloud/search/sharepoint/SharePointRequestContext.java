@@ -3,7 +3,6 @@ package com.google.enterprise.cloud.search.sharepoint;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.enterprise.adaptor.sharepoint.FormsAuthenticationHandler;
 import java.net.HttpURLConnection;
 import java.util.Collections;
 import java.util.HashMap;

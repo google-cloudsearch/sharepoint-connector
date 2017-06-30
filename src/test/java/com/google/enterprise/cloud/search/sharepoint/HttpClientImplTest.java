@@ -22,9 +22,7 @@ import org.junit.runner.RunWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.Mockito;
-import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.MockitoJUnitRunner;
-import org.mockito.stubbing.Answer;
 
 @RunWith(MockitoJUnitRunner.class)
 public class HttpClientImplTest {
@@ -395,11 +393,8 @@ public class HttpClientImplTest {
             errorStream);
     when(connectionFactory.getConnection(url)).thenReturn(connection);
     doAnswer(
-            new Answer<Void>() {
-              @Override
-              public Void answer(InvocationOnMock invocation) throws Throwable {
-                throw new IOException("Ignore error closing stream");
-              }
+            invocation -> {
+              throw new IOException("Ignore error closing stream");
             })
         .when(errorStream)
         .close();

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
 import com.google.common.base.Strings;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
-import com.google.enterprise.springboard.sdk.InvalidConfigurationException;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
+import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationSoap;
 
 import java.io.IOException;

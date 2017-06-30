@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -20,13 +20,11 @@ import static org.junit.Assert.assertFalse;
 import com.google.common.util.concurrent.ExecutionError;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import com.microsoft.schemas.sharepoint.soap.SiteDataSoap;
-
-import org.junit.After;
-import org.junit.Test;
-
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.junit.After;
+import org.junit.Test;
 
 /** Test cases for {@link RareModificationCache}. */
 public class RareModificationCacheTest {
@@ -102,31 +100,22 @@ public class RareModificationCacheTest {
 
   @Test(expected = IOException.class)
   public void testGetIOException() throws IOException {
-    cache.get(new RareModificationCache.CacheKey<Object>() {
-      @Override
-      public Object computeValue() throws IOException {
-        throw new IOException();
-      }
+    cache.get(() -> {
+      throw new IOException();
     });
   }
 
   @Test(expected = UncheckedExecutionException.class)
   public void testGetRuntimeException() throws IOException {
-    cache.get(new RareModificationCache.CacheKey<Object>() {
-      @Override
-      public Object computeValue() throws IOException {
-        throw new RuntimeException();
-      }
+    cache.get(() -> {
+      throw new RuntimeException();
     });
   }
 
   @Test(expected = ExecutionError.class)
   public void testGetError() throws IOException {
-    cache.get(new RareModificationCache.CacheKey<Object>() {
-      @Override
-      public Object computeValue() throws IOException {
-        throw new Error();
-      }
+    cache.get(() -> {
+      throw new Error();
     });
   }
 

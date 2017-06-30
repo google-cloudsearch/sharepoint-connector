@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
 import static org.junit.Assert.assertEquals;
 
-import com.google.enterprise.adaptor.sharepoint.FormsAuthenticationHandlerTest.MockScheduledExecutor;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.HttpPostClient;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.PostResponseInfo;
-
+import com.google.enterprise.cloud.search.sharepoint.FormsAuthenticationHandlerTest.MockScheduledExecutor;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.HttpPostClient;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.PostResponseInfo;
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -27,7 +26,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;

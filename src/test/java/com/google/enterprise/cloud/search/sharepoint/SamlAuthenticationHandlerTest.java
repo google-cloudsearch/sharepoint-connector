@@ -12,22 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import com.google.enterprise.adaptor.sharepoint.FormsAuthenticationHandlerTest.UnsupportedScheduledExecutor;
-import com.google.enterprise.adaptor.sharepoint.FormsAuthenticationHandlerTest.MockScheduledExecutor;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
-
+import com.google.enterprise.cloud.search.sharepoint.FormsAuthenticationHandlerTest.MockScheduledExecutor;
+import com.google.enterprise.cloud.search.sharepoint.FormsAuthenticationHandlerTest.UnsupportedScheduledExecutor;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
 import java.io.IOException;
-
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
-
 
 public class SamlAuthenticationHandlerTest {
   @Rule

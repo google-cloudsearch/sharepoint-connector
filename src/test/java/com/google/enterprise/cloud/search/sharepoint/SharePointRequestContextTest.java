@@ -6,7 +6,6 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.enterprise.adaptor.sharepoint.FormsAuthenticationHandler;
 import java.net.HttpURLConnection;
 import java.util.Arrays;
 import java.util.Collections;

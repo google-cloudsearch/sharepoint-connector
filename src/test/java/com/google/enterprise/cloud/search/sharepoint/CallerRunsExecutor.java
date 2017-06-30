@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
-import java.util.Collections;
+import com.google.common.util.concurrent.MoreExecutors;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -29,39 +27,43 @@ import java.util.concurrent.TimeUnit;
  * "terminated" after being shutdown, even if execute is still running.
  */
 class CallerRunsExecutor extends AbstractExecutorService {
-  private volatile boolean isShutdown;
+  private final ExecutorService delegate = MoreExecutors.newDirectExecutorService();
 
   @Override
   public void execute(Runnable command) {
-    if (isShutdown) {
+    if (isShutdown()) {
       throw new RejectedExecutionException("Executor already shutdown");
     }
-    command.run();
+    delegate.execute(command);
   }
 
   @Override
   public boolean awaitTermination(long timeout, TimeUnit unit) {
-    return isShutdown;
+    try {
+      return delegate.awaitTermination(timeout, unit);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
   }
 
   @Override
   public boolean isShutdown() {
-    return isShutdown;
+    return delegate.isShutdown();
   }
 
   @Override
   public boolean isTerminated() {
-    return isShutdown;
+    return delegate.isTerminated();
   }
 
   @Override
   public void shutdown() {
-    isShutdown = true;
+    delegate.shutdown();
   }
 
   @Override
   public List<Runnable> shutdownNow() {
-    shutdown();
-    return Collections.emptyList();
-  }  
+    return delegate.shutdownNow();
+  }
 }

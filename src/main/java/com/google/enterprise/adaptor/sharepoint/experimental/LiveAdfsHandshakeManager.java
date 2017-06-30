@@ -17,11 +17,10 @@ package com.google.enterprise.adaptor.sharepoint.experimental;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.HttpPostClient;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.HttpPostClientImpl;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.PostResponseInfo;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
-
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.HttpPostClient;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.HttpPostClientImpl;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.PostResponseInfo;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;

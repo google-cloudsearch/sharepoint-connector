@@ -3,13 +3,10 @@ package com.google.enterprise.cloud.search.sharepoint;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import com.google.api.services.springboardindex.model.ExternalGroup;
-import com.google.api.services.springboardindex.model.Principal;
+import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
-import com.google.enterprise.adaptor.sharepoint.MemberIdMapping;
-import com.google.enterprise.adaptor.sharepoint.SiteDataClient;
-import com.google.enterprise.springboard.sdk.Acl;
+import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.microsoft.schemas.sharepoint.soap.GroupMembership;
 import com.microsoft.schemas.sharepoint.soap.Permission;
 import com.microsoft.schemas.sharepoint.soap.PolicyUser;
@@ -100,32 +97,6 @@ class SiteConnector {
     return url;
   }
 
-  @VisibleForTesting
-  List<ExternalGroup> computeMembersForGroups(GroupMembership groups) {
-    checkNotNull(groups);
-    List<ExternalGroup> defs = new ArrayList<ExternalGroup>();
-    for (GroupMembership.Group group : groups.getGroup()) {
-      // Use SharePoint Site URL as namespace for local SharePoint Groups
-      String sharepointLocalGroup = Acl.getPrincipalName(group.getGroup().getName(), siteUrl);
-      List<Principal> members = new ArrayList<Principal>();
-      if (group.getUsers() != null) {
-        for (UserDescription user : group.getUsers().getUser()) {
-          Principal principal = userDescriptionToPrincipal(user);
-          if (principal == null) {
-            log.log(
-                Level.WARNING,
-                "Unable to determine login name. Skipping user with ID {0}",
-                user.getID());
-            continue;
-          }
-          members.add(principal);
-        }
-      }
-      defs.add(Acl.getExternalGroup(sharepointLocalGroup, members));
-    }
-    return defs;
-  }
-
   Acl getWebApplicationPolicyAcl(VirtualServer vs) {
     final long necessaryPermissionMask = LIST_ITEM_MASK;
     List<Principal> permits = new ArrayList<Principal>();
@@ -165,11 +136,9 @@ class SiteConnector {
       log.log(Level.FINER, "Policy User accountName = {0}", accountName);
       Principal principal;
       if (isGroup) {
-        principal =
-            Acl.getExternalGroupPrincipal(Acl.getPrincipalName(accountName, defaultNamespace));
+        principal = Acl.getGroupPrincipal(Acl.getPrincipalName(accountName, defaultNamespace));
       } else {
-        principal =
-            Acl.getExternalUserPrincipal(Acl.getPrincipalName(accountName, defaultNamespace));
+        principal = Acl.getUserPrincipal(Acl.getPrincipalName(accountName, defaultNamespace));
       }
       long grant = policyUser.getGrantMask().longValue();
       if ((necessaryPermissionMask & grant) == necessaryPermissionMask) {
@@ -323,7 +292,7 @@ class SiteConnector {
     for (GroupMembership.Group group : site.getGroups().getGroup()) {
       String sharepointLocalGroup =
           Acl.getPrincipalName(group.getGroup().getName(), site.getMetadata().getURL());
-      Principal localGroup = Acl.getExternalGroupPrincipal(sharepointLocalGroup);
+      Principal localGroup = Acl.getGroupPrincipal(sharepointLocalGroup);
       map.put(group.getGroup().getID(), localGroup);
     }
     for (UserDescription user : site.getWeb().getUsers().getUser()) {
@@ -376,11 +345,11 @@ class SiteConnector {
       if (isDomainGroup) {
         map.put(
             (int) user.getID(),
-            Acl.getExternalGroupPrincipal(Acl.getPrincipalName(userName, defaultNamespace)));
+            Acl.getGroupPrincipal(Acl.getPrincipalName(userName, defaultNamespace)));
       } else {
         map.put(
             (int) user.getID(),
-            Acl.getExternalUserPrincipal(Acl.getPrincipalName(userName, defaultNamespace)));
+            Acl.getUserPrincipal(Acl.getPrincipalName(userName, defaultNamespace)));
       }
     }
     mapping = new MemberIdMapping(map);
@@ -439,9 +408,9 @@ class SiteConnector {
       return null;
     }
     if (isDomainGroup) {
-      return Acl.getExternalGroupPrincipal(Acl.getPrincipalName(userName, defaultNamespace));
+      return Acl.getGroupPrincipal(Acl.getPrincipalName(userName, defaultNamespace));
     } else {
-      return Acl.getExternalUserPrincipal(Acl.getPrincipalName(userName, defaultNamespace));
+      return Acl.getUserPrincipal(Acl.getPrincipalName(userName, defaultNamespace));
     }
   }
 

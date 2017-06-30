@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.google.enterprise.adaptor.sharepoint;
+package com.google.enterprise.cloud.search.sharepoint;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.HttpPostClient;
-import com.google.enterprise.adaptor.sharepoint.SamlAuthenticationHandler.HttpPostClientImpl;
-
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.HttpPostClient;
+import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.HttpPostClientImpl;
 import java.io.IOException;
 import java.io.StringReader;
 import java.net.URL;
