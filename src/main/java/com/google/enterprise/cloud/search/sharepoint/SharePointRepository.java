@@ -14,7 +14,11 @@ import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
 import com.google.common.io.ByteStreams;
+import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.ChangeObjectType;
+import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.DiffKind;
+import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.CursorPaginator;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.Paginator;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.RepositoryException;
@@ -26,7 +30,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFor
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointClosableIterable;
-import com.google.enterprise.cloudsearch.sdk.indexing.template.ClosableIterable;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointClosableIterableImpl;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.Repository;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryContext;
@@ -34,12 +38,20 @@ import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryDoc;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabases;
 import com.microsoft.schemas.sharepoint.soap.ItemData;
+import com.microsoft.schemas.sharepoint.soap.ListMetadata;
 import com.microsoft.schemas.sharepoint.soap.Lists;
+import com.microsoft.schemas.sharepoint.soap.SPContentDatabase;
+import com.microsoft.schemas.sharepoint.soap.SPList;
+import com.microsoft.schemas.sharepoint.soap.SPListItem;
+import com.microsoft.schemas.sharepoint.soap.SPSite;
+import com.microsoft.schemas.sharepoint.soap.SPSiteMetadata;
+import com.microsoft.schemas.sharepoint.soap.SPWeb;
 import com.microsoft.schemas.sharepoint.soap.Scopes;
 import com.microsoft.schemas.sharepoint.soap.Site;
 import com.microsoft.schemas.sharepoint.soap.Sites;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
+import com.microsoft.schemas.sharepoint.soap.WebMetadata;
 import com.microsoft.schemas.sharepoint.soap.Webs;
 import com.microsoft.schemas.sharepoint.soap.Xml;
 import java.io.IOException;
@@ -54,6 +66,7 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -61,6 +74,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.logging.Level;
@@ -73,6 +87,10 @@ import org.w3c.dom.NodeList;
 
 public class SharePointRepository implements Repository {
   private static final Logger log = Logger.getLogger(SharePointRepository.class.getName());
+
+  private static final String PUSH_TYPE_MODIFIED = "MODIFIED";
+  private static final String PUSH_TYPE_NOT_MODIFIED = "NOT_MODIFIED";
+
   /**
    * The data element within a self-describing XML blob. See
    * http://msdn.microsoft.com/en-us/library/windows/desktop/ms675943.aspx .
@@ -224,6 +242,7 @@ public class SharePointRepository implements Repository {
 
   private final HttpClientImpl.Builder httpClientBuilder;
   private final SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
+  private SharePointIncrementalCheckpoint initIncrementalCheckpoint;
 
   SharePointRepository() {
     this(new HttpClientImpl.Builder(), new SiteConnectorFactoryImpl.Builder());
@@ -285,22 +304,386 @@ public class SharePointRepository implements Repository {
             .setRequestContext(requestContext)
             .setXmlValidation(xmlValidation)
             .build();
+    initIncrementalCheckpoint = computeIncrementalCheckpoint();
   }
 
   @Override
   public CheckpointClosableIterable getIds(byte[] checkpoint) throws RepositoryException {
     log.entering("SharePointConnector", "traverse");
-    ClosableIterable<ApiOperation> toReturn =
+    Collection<ApiOperation> toReturn =
         sharepointConfiguration.isSiteCollectionUrl()
             ? getDocIdsSiteCollectionOnly()
             : getDocIdsVirtualServer();
     log.exiting("SharePointConnector", "traverse");
-    return new CheckpointClosableIterable(toReturn);
+    return new CheckpointClosableIterableImpl.Builder(toReturn).build();
   }
 
   @Override
-  public CheckpointClosableIterable getChanges(byte[] checkpoint) {
-    return null;
+  public CheckpointClosableIterable getChanges(byte[] checkpoint) throws RepositoryException {
+    SharePointIncrementalCheckpoint previousCheckpoint;
+    try {
+      Optional<SharePointIncrementalCheckpoint> parsedCheckpoint =
+          Optional.ofNullable(SharePointIncrementalCheckpoint.parse(checkpoint));
+      previousCheckpoint =
+          parsedCheckpoint.filter(e -> e.isValid()).orElse(initIncrementalCheckpoint);
+    } catch (IOException e) {
+      log.log(
+          Level.WARNING, "Error parsing checkpoint. Resetting to checkpoint computed at init.", e);
+      previousCheckpoint = initIncrementalCheckpoint;
+    }
+    SharePointIncrementalCheckpoint currentCheckpoint = computeIncrementalCheckpoint();
+    // Possible mismatch between saved checkpoint and current connector configuration if connector
+    // switch from VirtualServer mode to siteCollectionOnly mode or vice-versa.
+    boolean mismatchObjectType =
+        previousCheckpoint.getObjectType() != currentCheckpoint.getObjectType();
+    if (mismatchObjectType) {
+      log.log(
+          Level.INFO,
+          "Mismatch between previous checkpoint object type {0} and "
+              + "current checkpoint object type {1}. Resetting to checkpoint computed at init.",
+          new Object[] {previousCheckpoint.getObjectType(), currentCheckpoint.getObjectType()});
+      previousCheckpoint = initIncrementalCheckpoint;
+    }
+    if (sharepointConfiguration.isSiteCollectionUrl()) {
+      checkState(
+          currentCheckpoint.getObjectType() == ChangeObjectType.SITE_COLLECTION,
+          "Mismatch between SharePoint Configuration and Checkpoint Type. "
+              + "Expected SITE_COLLECTION. Actual %s",
+          currentCheckpoint.getObjectType());
+      try {
+        return getChangesSiteCollectionOnlyMode(previousCheckpoint, currentCheckpoint);
+      } catch (IOException e) {
+        throw buildRepositoryExceptionFromIOException(
+            "error processing changes SiteCollectionOnlyMode", e);
+      }
+    } else {
+      checkState(
+          currentCheckpoint.getObjectType() == ChangeObjectType.CONTENT_DB,
+          "Mismatch between SharePoint Configuration and Checkpoint Type. "
+              + "Expected CONTENT_DB. Actual %s",
+          currentCheckpoint.getObjectType());
+      try {
+        return getChangesVirtualServerMode(previousCheckpoint, currentCheckpoint);
+      } catch (IOException e) {
+        throw buildRepositoryExceptionFromIOException(
+            "error processing changes VirtualServerMode", e);
+      }
+    }
+  }
+
+  private CheckpointClosableIterable getChangesSiteCollectionOnlyMode(
+      SharePointIncrementalCheckpoint previous, SharePointIncrementalCheckpoint current)
+      throws IOException {
+    Map<DiffKind, Set<String>> diff = previous.diff(current);
+    Set<String> notModified = diff.get(DiffKind.NOT_MODIFIED);
+    if (!notModified.isEmpty()) {
+      checkState(
+          notModified.size() == 1,
+          "Unexpected number of Change ObjectIds %s for SiteCollectionOnlyMode",
+          notModified);
+      // No Changes since last checkpoint.
+      return new CheckpointClosableIterableImpl.Builder(Collections.emptyList())
+          .setCheckpoint(previous.encodePayload())
+          .setHasMoreItems(false)
+          .build();
+    }
+
+    Set<String> modified = diff.get(DiffKind.MODIFIED);
+    if (!modified.isEmpty()) {
+      // Process Changes since last checkpoint.
+      SiteConnector scConnector = getSiteConnectorForSiteCollectionOnly();
+      String siteCollectionGuid = Iterables.getOnlyElement(modified);
+      String changeToken = previous.getTokens().get(siteCollectionGuid);
+      CursorPaginator<SPSite, String> changes = scConnector
+          .getSiteDataClient()
+          .getChangesSPSite(siteCollectionGuid, changeToken);
+      PushItems.Builder modifiedItems = new PushItems.Builder();
+      SPSite change;
+      while ((change = changes.next()) != null) {
+        getModifiedDocIdsSite(scConnector, change, modifiedItems);
+        changeToken = changes.getCursor();
+      }
+      SharePointIncrementalCheckpoint updatedCheckpoint =
+          new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+              .addChangeToken(siteCollectionGuid, changeToken)
+              .build();
+      return new CheckpointClosableIterableImpl.Builder(
+              Collections.singleton(modifiedItems.build()))
+          .setCheckpoint(updatedCheckpoint.encodePayload())
+          .setHasMoreItems(false)
+          .build();
+    }
+
+    // This is a case where we try to handle change in configuration where connector is pointing to
+    // different site collection.
+    // Note : We rely on re-indexing of previously configured site collection to delete from index.
+    // To support faster deletes we can either save previous site URL as part of checkpoint or
+    // switch to SharePoint Object Id for item identifiers. For now we are ignoring DiffKind.REMOVE
+    Set<String> added = diff.get(DiffKind.ADD);
+    checkState(
+        !added.isEmpty(),
+        "In SiteCollectionOnlyMode current SiteCollection "
+            + "should exist in MODIFIED or NOT_MODIFIED or ADD");
+    SiteConnector scConnector = getSiteConnectorForSiteCollectionOnly();
+    String siteCollectionGuid = Iterables.getOnlyElement(added);
+    // Process Changes since initial checkpoint at start.
+    String changeToken = initIncrementalCheckpoint.getTokens().get(siteCollectionGuid);
+    CursorPaginator<SPSite, String> changes =
+        scConnector.getSiteDataClient().getChangesSPSite(siteCollectionGuid, changeToken);
+    PushItems.Builder modifiedItems = new PushItems.Builder();
+    SPSite change;
+    while ((change = changes.next()) != null) {
+      getModifiedDocIdsSite(scConnector, change, modifiedItems);
+      changeToken = changes.getCursor();
+    }
+    SharePointIncrementalCheckpoint updatedCheckpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(siteCollectionGuid, changeToken)
+            .build();
+    return new CheckpointClosableIterableImpl.Builder(Collections.singleton(modifiedItems.build()))
+        .setCheckpoint(updatedCheckpoint.encodePayload())
+        .setHasMoreItems(false)
+        .build();
+  }
+
+  private void getModifiedDocIdsSite(
+      SiteConnector scConnector, SPSite changes, PushItems.Builder pushItems) throws IOException {
+    SPSite.Site site = changes.getSite();
+    if (Objects.isNull(site)) {
+      return;
+    }
+    SPSiteMetadata metadata = site.getMetadata();
+    String encodedDocId = scConnector.encodeDocId(getCanonicalUrl(metadata.getURL()));
+    SharePointObject siteCollection =
+        new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+            .setUrl(encodedDocId)
+            .setObjectId(metadata.getID())
+            .setSiteId(metadata.getID())
+            .setWebId(metadata.getID())
+            .build();
+    if (isModified(changes.getChange())) {
+      pushItems.addPushItem(
+          encodedDocId,
+          new PushItem().encodePayload(siteCollection.encodePayload()).setType(PUSH_TYPE_MODIFIED));
+    }
+    List<SPWeb> changedWebs = changes.getSPWeb();
+    if (changedWebs == null) {
+      return;
+    }
+    for (SPWeb web : changedWebs) {
+      getModifiedDocIdsWeb(siteCollection, web, pushItems);
+    }
+  }
+
+  private void getModifiedDocIdsWeb(
+      SharePointObject parentObject,
+      SPWeb changes,
+      PushItems.Builder pushItems)
+      throws IOException {
+    SPWeb.Web web = changes.getWeb();
+    if (Objects.isNull(web)) {
+      return;
+    }
+    WebMetadata metadata = web.getMetadata();
+    String sharepointUrl = getCanonicalUrl(metadata.getURL());
+    SiteConnector webConnector = getSiteConnector(parentObject.getUrl(), sharepointUrl);
+    String encodedDocId = webConnector.encodeDocId(sharepointUrl);
+    SharePointObject payload =
+        new SharePointObject.Builder(SharePointObject.WEB)
+            .setSiteId(parentObject.getSiteId())
+            .setWebId(metadata.getID())
+            .setUrl(encodedDocId)
+            .setObjectId(metadata.getID())
+            .build();
+    if (isModified(changes.getChange())) {
+      pushItems.addPushItem(
+          encodedDocId,
+          new PushItem().encodePayload(payload.encodePayload()).setType(PUSH_TYPE_MODIFIED));
+    }
+
+    List<Object> spObjects = changes.getSPFolderOrSPListOrSPFile();
+    if (spObjects == null) {
+      return;
+    }
+    for (Object choice : spObjects) {
+      if (choice instanceof SPList) {
+        getModifiedDocIdsList(webConnector, parentObject, (SPList) choice, pushItems);
+      }
+    }
+  }
+
+  private void getModifiedDocIdsList(
+      SiteConnector webConnector,
+      SharePointObject parentObject,
+      SPList changes,
+      PushItems.Builder pushItems)
+      throws IOException {
+    com.microsoft.schemas.sharepoint.soap.List list = changes.getList();
+    if (Objects.isNull(list)) {
+      return;
+    }
+    ListMetadata metadata = list.getMetadata();
+    String encodedDocId = webConnector.encodeDocId(metadata.getDefaultViewUrl());
+    SharePointObject payload =
+        new SharePointObject.Builder(SharePointObject.LIST)
+            .setSiteId(parentObject.getSiteId())
+            .setWebId(parentObject.getWebId())
+            .setUrl(encodedDocId)
+            .setListId(metadata.getID())
+            .setObjectId(metadata.getID())
+            .build();
+    if (isModified(changes.getChange())) {
+      pushItems.addPushItem(
+          encodedDocId,
+          new PushItem().encodePayload(payload.encodePayload()).setType(PUSH_TYPE_MODIFIED));
+    }
+    List<Object> spObjects = changes.getSPViewOrSPListItem();
+    if (spObjects == null) {
+      return;
+    }
+    for (Object choice : spObjects) {
+      // Ignore view change detection.
+
+      if (choice instanceof SPListItem) {
+        getModifiedDocIdsListItem(webConnector, payload, (SPListItem) choice, pushItems);
+      }
+    }
+  }
+
+  private void getModifiedDocIdsListItem(
+      SiteConnector webConnector,
+      SharePointObject parentObject,
+      SPListItem changes,
+      PushItems.Builder pushItems)
+      throws IOException {
+    if (isModified(changes.getChange())) {
+      SPListItem.ListItem listItem = changes.getListItem();
+      if (listItem == null) {
+        return;
+      }
+      Object oData = listItem.getAny();
+      if (!(oData instanceof Element)) {
+        log.log(Level.WARNING, "Unexpected object type for data: {0}", oData.getClass());
+      } else {
+        Element data = (Element) oData;
+        String serverUrl = data.getAttribute(OWS_SERVERURL_ATTRIBUTE);
+        if (serverUrl == null) {
+          log.log(
+              Level.WARNING,
+              "Could not find server url attribute for " + "list item {0}",
+              changes.getId());
+        } else {
+          String encodedDocId = webConnector.encodeDocId(getCanonicalUrl(serverUrl));
+          SharePointObject payload =
+              new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+                  .setListId(parentObject.getListId())
+                  .setSiteId(parentObject.getSiteId())
+                  .setWebId(parentObject.getWebId())
+                  .setUrl(encodedDocId)
+                  .setObjectId("item")
+                  .build();
+          pushItems.addPushItem(
+              encodedDocId,
+              new PushItem().encodePayload(payload.encodePayload()).setType(PUSH_TYPE_MODIFIED));
+        }
+      }
+    }
+  }
+
+  private boolean isModified(String change) {
+    return !"Unchanged".equals(change) && !"Delete".equals(change);
+  }
+
+  private CheckpointClosableIterable getChangesVirtualServerMode(
+      SharePointIncrementalCheckpoint previous, SharePointIncrementalCheckpoint current)
+      throws IOException {
+    SharePointIncrementalCheckpoint.Builder newCheckpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB);
+    Map<DiffKind, Set<String>> diff = previous.diff(current);
+    Set<String> notModified = diff.get(DiffKind.NOT_MODIFIED);
+    // Copy over not modified items
+    for (String contentDbId : notModified) {
+      newCheckpoint.addChangeToken(contentDbId, previous.getTokens().get(contentDbId));
+    }
+
+    // Process changes in previously known content DBs
+    Set<String> modified = diff.get(DiffKind.MODIFIED);
+    PushItems.Builder modifiedItems = new PushItems.Builder();
+    SiteConnector vsSiteConnector = getSiteConnectorForVirtualServer();
+    for (String contentDbId : modified) {
+      newCheckpoint.addChangeToken(
+          contentDbId,
+          getModifiedDocIdsContentDb(
+              vsSiteConnector, contentDbId, previous.getTokens().get(contentDbId), modifiedItems));
+    }
+
+    // Process newly discovered content DBs.
+    // Note : Connector rely on reindexing to delete sites under deleted content databases.
+    // Alternatively, if Content DB act as a container for site collection then we can simply delete
+    // Content DB node.
+    Set<String> added = diff.get(DiffKind.ADD);
+    for (String contentDbId : added) {
+      // Process newly added content DBs from init checkpoint if content DB was known during init
+      // otherwise use values from current checkpoint.
+      String changeToken =
+          initIncrementalCheckpoint.getTokens().containsKey(contentDbId)
+              ? initIncrementalCheckpoint.getTokens().get(contentDbId)
+              : current.getTokens().get(contentDbId);
+      newCheckpoint.addChangeToken(
+          contentDbId,
+          getModifiedDocIdsContentDb(vsSiteConnector, contentDbId, changeToken, modifiedItems));
+    }
+
+    return new CheckpointClosableIterableImpl.Builder(Collections.singleton(modifiedItems.build()))
+        .setCheckpoint(newCheckpoint.build().encodePayload())
+        .setHasMoreItems(false)
+        .build();
+  }
+
+  private String getModifiedDocIdsContentDb(
+      SiteConnector vsConnector,
+      String contentDb,
+      String lastChangeToken,
+      PushItems.Builder modifiedItems)
+      throws IOException {
+    CursorPaginator<SPContentDatabase, String> changesContentDatabase =
+        vsConnector.getSiteDataClient().getChangesContentDatabase(contentDb, lastChangeToken);
+    String changeToken = lastChangeToken;
+    boolean virtualServerAdded = false;
+    SPContentDatabase change;
+    while ((change = changesContentDatabase.next()) != null) {
+      if (!virtualServerAdded && isModified(change.getChange())) {
+        SharePointObject vsObject =
+            new SharePointObject.Builder(SharePointObject.VIRTUAL_SERVER).build();
+        PushItem pushItem =
+            new PushItem().encodePayload(vsObject.encodePayload()).setType(PUSH_TYPE_MODIFIED);
+        modifiedItems.addPushItem(VIRTUAL_SERVER_ID, pushItem);
+        virtualServerAdded = true;
+      }
+      List<SPSite> changedSites = change.getSPSite();
+      if (changedSites == null) {
+        continue;
+      }
+
+      for (SPSite site : changedSites) {
+        SPSite.Site changedSite = site.getSite();
+        if (changedSite == null) {
+          continue;
+        }
+        SPSiteMetadata metadata = changedSite.getMetadata();
+        SiteConnector siteConnector;
+        String canonicalUrl = getCanonicalUrl(metadata.getURL());
+        try {
+          siteConnector = getConnectorForDocId(canonicalUrl);
+        } catch (URISyntaxException e) {
+          throw new IOException(
+              "Error creating SiteConnector for URL : " + canonicalUrl, e);
+        }
+        getModifiedDocIdsSite(siteConnector, site, modifiedItems);
+      }
+      changeToken = changesContentDatabase.getCursor();
+    }
+    return changeToken;
   }
 
   @Override
@@ -325,7 +708,7 @@ public class SharePointRepository implements Repository {
       if (SharePointObject.NAMED_RESOURCE.equals(objectType)) {
         // Do not process named resource here.
         PushItem notModified =
-            new PushItem().setType("NOT_MODIFIED").encodePayload(object.encodePayload());
+            new PushItem().setType(PUSH_TYPE_NOT_MODIFIED).encodePayload(object.encodePayload());
         return new PushItems.Builder().addPushItem(item.getName(), notModified).build();
       }
 
@@ -359,12 +742,11 @@ public class SharePointRepository implements Repository {
         return getAttachmentDocContent(item, siteConnector, object);
       }
       PushItem notModified =
-          new PushItem()
-              .setType("notModified")
-              .encodePayload(object.encodePayload());
+          new PushItem().setType(PUSH_TYPE_NOT_MODIFIED).encodePayload(object.encodePayload());
       return new PushItems.Builder().addPushItem(item.getName(), notModified).build();
     } catch (IOException e) {
-      throw buildRepositoryExceptionFromIOException(e);
+      throw buildRepositoryExceptionFromIOException(
+          String.format("error processing item %s", item), e);
     }
   }
 
@@ -423,17 +805,62 @@ public class SharePointRepository implements Repository {
     return getSiteConnector(site.value, web.value);
   }
 
-  private ClosableIterable<ApiOperation> getDocIdsVirtualServer() throws RepositoryException {
+  private SharePointIncrementalCheckpoint computeIncrementalCheckpoint()
+      throws RepositoryException {
+    return sharepointConfiguration.isSiteCollectionUrl()
+        ? computeIncrementalCheckpointSiteCollection()
+        : computeIncrementalCheckpointVirtualServer();
+  }
+
+  private SharePointIncrementalCheckpoint computeIncrementalCheckpointSiteCollection()
+      throws RepositoryException {
+    try {
+      SiteConnector scConnector = getSiteConnectorForSiteCollectionOnly();
+      Site site = scConnector.getSiteDataClient().getContentSite();
+      return new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+          .addChangeToken(site.getMetadata().getID(), site.getMetadata().getChangeId())
+          .build();
+    } catch (IOException e) {
+      throw buildRepositoryExceptionFromIOException(
+          "error computing incremental checkpoint for SiteCollection", e);
+    }
+  }
+
+  private SharePointIncrementalCheckpoint computeIncrementalCheckpointVirtualServer()
+      throws RepositoryException {
+    try {
+      SiteConnector vsConnector = getSiteConnectorForVirtualServer();
+      checkNotNull(vsConnector);
+      VirtualServer vs = vsConnector.getSiteDataClient().getContentVirtualServer();
+      SharePointIncrementalCheckpoint.Builder builder =
+          new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB);
+      for (ContentDatabases.ContentDatabase cdcd : vs.getContentDatabases().getContentDatabase()) {
+        try {
+          ContentDatabase cd =
+              vsConnector.getSiteDataClient().getContentContentDatabase(cdcd.getID(), true);
+          builder.addChangeToken(
+              cd.getMetadata().getID(),
+              cd.getMetadata().getChangeId());
+        } catch (IOException ex) {
+          log.log(Level.WARNING, "Failed to get content database: " + cdcd.getID(), ex);
+          continue;
+        }
+      }
+      return builder.build();
+    } catch (IOException e) {
+      throw buildRepositoryExceptionFromIOException(
+          "error computing incremental checkpoint for virtualServer", e);
+    }
+  }
+
+  private Collection<ApiOperation> getDocIdsVirtualServer() throws RepositoryException {
     try {
       List<ApiOperation> operations = new ArrayList<ApiOperation>();
       SharePointObject vsObject =
           new SharePointObject.Builder(SharePointObject.VIRTUAL_SERVER).build();
       PushItem pushItem = new PushItem().encodePayload(vsObject.encodePayload());
       operations.add(new PushItems.Builder().addPushItem(VIRTUAL_SERVER_ID, pushItem).build());
-      SiteConnector vsConnector =
-          getSiteConnector(
-              sharepointConfiguration.getVirtualServerUrl(),
-              sharepointConfiguration.getVirtualServerUrl());
+      SiteConnector vsConnector = getSiteConnectorForVirtualServer();
       checkNotNull(vsConnector);
       VirtualServer vs = vsConnector.getSiteDataClient().getContentVirtualServer();
       for (ContentDatabases.ContentDatabase cdcd : vs.getContentDatabases().getContentDatabase()) {
@@ -461,34 +888,45 @@ public class SharePointRepository implements Repository {
           }
         }
       }
-      return ApiOperations.wrapAsClosableIterable(operations.iterator());
+      return operations;
     } catch (IOException e) {
-      throw buildRepositoryExceptionFromIOException(e);
+      throw buildRepositoryExceptionFromIOException("error listing Ids for VirtualServer", e);
     }
   }
 
-  private ClosableIterable<ApiOperation> getDocIdsSiteCollectionOnly() throws RepositoryException {
+  private SiteConnector getSiteConnectorForVirtualServer() throws IOException {
+    return getSiteConnector(
+        sharepointConfiguration.getVirtualServerUrl(),
+        sharepointConfiguration.getVirtualServerUrl());
+  }
+
+  private Collection<ApiOperation> getDocIdsSiteCollectionOnly() throws RepositoryException {
     try {
-      List<ApiOperation> operations = new ArrayList<ApiOperation>();
-      SiteConnector scConnector =
-          getSiteConnector(
-              sharepointConfiguration.getSharePointUrl().getUrl(),
-              sharepointConfiguration.getSharePointUrl().getUrl());
-      Site site = scConnector.getSiteDataClient().getContentSite();
-      String siteCollectionUrl = getCanonicalUrl(site.getMetadata().getURL());
-      SharePointObject siteCollection =
-          new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
-              .setUrl(siteCollectionUrl)
-              .setObjectId(site.getMetadata().getID())
-              .setSiteId(site.getMetadata().getID())
-              .setWebId(site.getMetadata().getID())
-              .build();
-      PushItem pushEntry = new PushItem().encodePayload(siteCollection.encodePayload());
-      operations.add(new PushItems.Builder().addPushItem(siteCollectionUrl, pushEntry).build());
-      return ApiOperations.wrapAsClosableIterable(operations.iterator());
+      return Collections.singleton(getPushItemsForSiteCollectionOnly());
     } catch (IOException e) {
-      throw buildRepositoryExceptionFromIOException(e);
+      throw buildRepositoryExceptionFromIOException("error listing Ids for SiteCollectionOnly", e);
     }
+  }
+
+  private PushItems getPushItemsForSiteCollectionOnly() throws IOException {
+    SiteConnector scConnector = getSiteConnectorForSiteCollectionOnly();
+    Site site = scConnector.getSiteDataClient().getContentSite();
+    String siteCollectionUrl = getCanonicalUrl(site.getMetadata().getURL());
+    SharePointObject siteCollection =
+        new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+            .setUrl(siteCollectionUrl)
+            .setObjectId(site.getMetadata().getID())
+            .setSiteId(site.getMetadata().getID())
+            .setWebId(site.getMetadata().getID())
+            .build();
+    PushItem pushEntry = new PushItem().encodePayload(siteCollection.encodePayload());
+    return new PushItems.Builder().addPushItem(siteCollectionUrl, pushEntry).build();
+  }
+
+  private SiteConnector getSiteConnectorForSiteCollectionOnly() throws IOException {
+    return getSiteConnector(
+        sharepointConfiguration.getSharePointUrl().getUrl(),
+        sharepointConfiguration.getSharePointUrl().getUrl());
   }
 
   private ApiOperation getVirtualServerDocContent() throws RepositoryException {
@@ -527,15 +965,15 @@ public class SharePointRepository implements Repository {
           log.log(Level.WARNING, "Error retriving sites from content database " + cdcd.getID(), ex);
         }
       }
-
       return docBuilder.build();
     } catch (IOException e) {
-      throw buildRepositoryExceptionFromIOException(e);
+      throw buildRepositoryExceptionFromIOException("error processing VirtualServerDoc", e);
     }
   }
 
-  private static RepositoryException buildRepositoryExceptionFromIOException(IOException e) {
-    return new RepositoryException.Builder().setCause(e).build();
+  private static RepositoryException buildRepositoryExceptionFromIOException(
+      String message, IOException e) {
+    return new RepositoryException.Builder().setErrorMessage(message).setCause(e).build();
   }
 
   private ApiOperation getSiteCollectionDocContent(

@@ -3,6 +3,7 @@ package com.google.enterprise.cloud.search.sharepoint;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -17,6 +18,8 @@ import com.google.api.services.cloudsearch.v1.model.Item;
 import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
+import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.ChangeObjectType;
+import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.CursorPaginator;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.Paginator;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.RepositoryException;
@@ -28,11 +31,16 @@ import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointClosableIterable;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointClosableIterableImpl;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointClosableIterableImpl.CompareCheckpointClosableIterableRule;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryDoc;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.ItemData;
+import com.microsoft.schemas.sharepoint.soap.SPContentDatabase;
+import com.microsoft.schemas.sharepoint.soap.SPSite;
 import com.microsoft.schemas.sharepoint.soap.Site;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
@@ -66,6 +74,11 @@ public class SharePointRepositoryTest {
   @Rule public ExpectedException thrown = ExpectedException.none();
   @Rule public ResetConfigRule resetConfig = new ResetConfigRule();
   @Rule public SetupConfigRule setupConfig = SetupConfigRule.uninitialized();
+
+  @Rule
+  public CompareCheckpointClosableIterableRule checkpointIterableRule =
+      CompareCheckpointClosableIterableRule.getCompareRule();
+
   @Mock HttpClientImpl.Builder httpClientBuilder;
   @Mock SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
   @Mock HttpClientImpl httpClient;
@@ -75,6 +88,8 @@ public class SharePointRepositoryTest {
   @Mock PeopleSoap peopleSoap;
   @Mock UserGroupSoap userGroupSoap;
   @Mock RepositoryContext repoContext;
+  @Mock CursorPaginator<SPSite, String> siteChangesPaginator;
+  @Mock CursorPaginator<SPContentDatabase, String> cdChangesPaginator;
 
   @Before
   public void setup() {
@@ -109,7 +124,7 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void testInit() throws RepositoryException {
+  public void testInit() throws IOException {
     SharePointRepository repo = setUpDefaultRepository();
     SharePointRequestContext requestContext =
         new SharePointRequestContext.Builder()
@@ -130,8 +145,21 @@ public class SharePointRepositoryTest {
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
   }
 
+  private void setupVirtualServerForInit() throws IOException {
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupVirualServer();
+    setupContentDB("{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}");
+  }
+
   @Test
-  public void testInitNonDefaultValues() throws RepositoryException {
+  public void testInitNonDefaultValues() throws IOException {
     SharePointRepository repo =
         new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
 
@@ -143,6 +171,7 @@ public class SharePointRepositoryTest {
         .thenReturn(siteConnectorFactoryBuilder);
     properties.put("sharepoint.userAgent", "custom-user-agent");
     overrideConfig(properties);
+    setupVirtualServerForInit();
     repo.init(repoContext);
     SharePointRequestContext requestContext =
         new SharePointRequestContext.Builder()
@@ -166,16 +195,6 @@ public class SharePointRepositoryTest {
   public void testGetDocIdsVirtualServer() throws IOException {
     SharePointRepository repo = setUpDefaultRepository();
     repo.init(repoContext);
-    SiteConnector scRoot =
-        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
-            .setSiteDataClient(siteDataClient)
-            .setPeople(peopleSoap)
-            .setUserGroup(userGroupSoap)
-            .build();
-    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
-        .thenReturn(scRoot);
-    setupVirualServer();
-    setupContentDB("{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}");
     String rootSite =
         SharePointResponseHelper.getSiteCollectionResponse()
             .replaceAll("/sites/SiteCollection", "");
@@ -201,7 +220,6 @@ public class SharePointRepositoryTest {
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
-    repo.init(repoContext);
     SiteConnector scRoot =
         new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
             .setSiteDataClient(siteDataClient)
@@ -214,6 +232,7 @@ public class SharePointRepositoryTest {
         SharePointResponseHelper.getSiteCollectionResponse()
             .replaceAll("/sites/SiteCollection", "");
     setupSite(rootSite);
+    repo.init(repoContext);
     List<ApiOperation> operations = new ArrayList<ApiOperation>();
     SharePointObject siteCollectionPayload =
         new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
@@ -598,6 +617,503 @@ public class SharePointRepositoryTest {
     assertEquals(expectedDoc.build(), actual);
   }
 
+  @Test
+  public void testGetChangesNullCheckpointNoChangesSinceInitSiteCollectionOnly()
+      throws IOException {
+    SharePointRepository repo =
+        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    Properties properties = getBaseConfig();
+    properties.put("sharepoint.siteCollectionOnly", "true");
+    overrideConfig(properties);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(Collections.emptyList())
+            .setCheckpoint(checkpoint.encodePayload())
+            .setHasMoreItems(false)
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(null);
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesWithCheckpointNoChangesSinceInitSiteCollectionOnly()
+      throws IOException {
+    SharePointRepository repo =
+        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    Properties properties = getBaseConfig();
+    properties.put("sharepoint.siteCollectionOnly", "true");
+    overrideConfig(properties);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(Collections.emptyList())
+            .setCheckpoint(checkpoint.encodePayload())
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(checkpoint.encodePayload());
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesInvalidCheckpointNoChangesSinceInitSiteCollectionOnly()
+      throws IOException {
+    SharePointRepository repo =
+        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    Properties properties = getBaseConfig();
+    properties.put("sharepoint.siteCollectionOnly", "true");
+    overrideConfig(properties);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(Collections.emptyList())
+            .setCheckpoint(checkpoint.encodePayload())
+            .setHasMoreItems(false)
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges("invalid".getBytes());
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesSwitchToSiteCollectionOnlyModeNoChangesSinceInitSiteCollectionOnly()
+      throws IOException {
+    SharePointRepository repo =
+        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    Properties properties = getBaseConfig();
+    properties.put("sharepoint.siteCollectionOnly", "true");
+    overrideConfig(properties);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpointOld =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-old}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;something")
+            .build();
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(Collections.emptyList())
+            .setCheckpoint(checkpoint.encodePayload())
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesSwitchToAnotherSiteCollectionChangesSinceInitSiteCollectionOnly()
+      throws IOException {
+    SharePointRepository repo =
+        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    Properties properties = getBaseConfig();
+    properties.put("sharepoint.siteCollectionOnly", "true");
+    overrideConfig(properties);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String changes726 =
+        SharePointResponseHelper.getChangesForSiteCollection()
+            .replace("<SPSite ", "<SPSite xmlns='" + XMLNS + "' ")
+            .replaceAll("/sites/SiteCollection", "");
+    when(siteChangesPaginator.next())
+        .thenReturn(SiteDataClient.jaxbParse(changes726, SPSite.class, false))
+        .thenReturn(null);
+    when(siteChangesPaginator.getCursor())
+        .thenReturn("1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;728");
+    when(siteDataClient.getChangesSPSite(
+            "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+            "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726"))
+        .thenReturn(siteChangesPaginator);
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpointOld =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-old}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
+            .build();
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;728")
+            .build();
+    SharePointObject listItemObject =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Announcements/2_.000")
+            .setObjectId("item")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(
+                Collections.<ApiOperation>singleton(
+                    new PushItems.Builder()
+                        .addPushItem(
+                            "http://localhost:1/Lists/Announcements/2_.000",
+                            new PushItem()
+                                .setType("MODIFIED")
+                                .encodePayload(listItemObject.encodePayload()))
+                        .build()))
+            .setCheckpoint(checkpoint.encodePayload())
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesSinceCheckpointSiteCollectionOnly() throws IOException {
+    SharePointRepository repo =
+        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    Properties properties = getBaseConfig();
+    properties.put("sharepoint.siteCollectionOnly", "true");
+    overrideConfig(properties);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String changes726 =
+        SharePointResponseHelper.getChangesForSiteCollection()
+            .replace("<SPSite ", "<SPSite xmlns='" + XMLNS + "' ")
+            .replaceAll("/sites/SiteCollection", "");
+    when(siteChangesPaginator.next())
+        .thenReturn(SiteDataClient.jaxbParse(changes726, SPSite.class, false))
+        .thenReturn(null);
+    when(siteChangesPaginator.getCursor())
+        .thenReturn("1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;728");
+    when(siteDataClient.getChangesSPSite(
+            "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+            "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;724"))
+        .thenReturn(siteChangesPaginator);
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpointOld =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;724")
+            .build();
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
+            .addChangeToken(
+                "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
+                "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;728")
+            .build();
+    SharePointObject listItemObject =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Announcements/2_.000")
+            .setObjectId("item")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(
+                Collections.<ApiOperation>singleton(
+                    new PushItems.Builder()
+                        .addPushItem(
+                            "http://localhost:1/Lists/Announcements/2_.000",
+                            new PushItem()
+                                .setType("MODIFIED")
+                                .encodePayload(listItemObject.encodePayload()))
+                        .build()))
+            .setCheckpoint(checkpoint.encodePayload())
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesNullCheckpointNoChangesSinceInitVirtualServer() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB)
+            .addChangeToken(
+                "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
+                "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(
+                Collections.singleton(new PushItems.Builder().build()))
+            .setCheckpoint(checkpoint.encodePayload())
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(null);
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesCheckpointNoChangesSinceInitVirtualServer() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB)
+            .addChangeToken(
+                "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
+                "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(
+                Collections.<ApiOperation>singleton(new PushItems.Builder().build()))
+            .setCheckpoint(checkpoint.encodePayload())
+            .setHasMoreItems(false)
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(checkpoint.encodePayload());
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesWithChangesCheckpointVirtualServer() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    setupGetSiteAndWeb("http://localhost:1", "http://localhost:1", "http://localhost:1", 0);
+    String changes726 =
+        SharePointResponseHelper.getChangesForcontentDB()
+            .replace("<SPContentDatabase ", "<SPContentDatabase xmlns='" + XMLNS + "' ")
+            .replaceAll("/sites/SiteCollection", "");
+    when(cdChangesPaginator.next())
+        .thenReturn(SiteDataClient.jaxbParse(changes726, SPContentDatabase.class, false))
+        .thenReturn(null);
+    when(cdChangesPaginator.getCursor())
+        .thenReturn("1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603");
+    when(siteDataClient.getChangesContentDatabase(
+            "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
+            "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;600"))
+        .thenReturn(cdChangesPaginator);
+
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpointOld =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB)
+            .addChangeToken(
+                "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
+                "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;600")
+            .build();
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB)
+            .addChangeToken(
+                "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
+                "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603")
+            .build();
+    SharePointObject listItemObject =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Announcements/2_.000")
+            .setObjectId("item")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(
+                Collections.<ApiOperation>singleton(
+                    new PushItems.Builder()
+                        .addPushItem(
+                            "http://localhost:1/Lists/Announcements/2_.000",
+                            new PushItem()
+                                .setType("MODIFIED")
+                                .encodePayload(listItemObject.encodePayload()))
+                        .build()))
+            .setCheckpoint(checkpoint.encodePayload())
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
+  @Test
+  public void testGetChangesRemovedContentDBCheckpointVirtualServer() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    setupGetSiteAndWeb("http://localhost:1", "http://localhost:1", "http://localhost:1", 0);
+    String changes726 =
+        SharePointResponseHelper.getChangesForcontentDB()
+            .replace("<SPContentDatabase ", "<SPContentDatabase xmlns='" + XMLNS + "' ")
+            .replaceAll("/sites/SiteCollection", "");
+    when(cdChangesPaginator.next())
+        .thenReturn(SiteDataClient.jaxbParse(changes726, SPContentDatabase.class, false))
+        .thenReturn(null);
+    when(cdChangesPaginator.getCursor())
+        .thenReturn("1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603");
+    when(siteDataClient.getChangesContentDatabase(
+            "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
+            "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;600"))
+        .thenReturn(cdChangesPaginator);
+
+    repo.init(repoContext);
+    SharePointIncrementalCheckpoint checkpointOld =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB)
+            .addChangeToken(
+                "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
+                "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;600")
+            .addChangeToken(
+                "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8-removed}",
+                "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;removed")
+            .build();
+    SharePointIncrementalCheckpoint checkpoint =
+        new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.CONTENT_DB)
+            .addChangeToken(
+                "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
+                "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603")
+            .build();
+    SharePointObject listItemObject =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Announcements/2_.000")
+            .setObjectId("item")
+            .build();
+    CheckpointClosableIterableImpl expected =
+        new CheckpointClosableIterableImpl.Builder(
+                Collections.<ApiOperation>singleton(
+                    new PushItems.Builder()
+                        .addPushItem(
+                            "http://localhost:1/Lists/Announcements/2_.000",
+                            new PushItem()
+                                .setType("MODIFIED")
+                                .encodePayload(listItemObject.encodePayload()))
+                        .build()))
+            .setCheckpoint(checkpoint.encodePayload())
+            .build();
+
+    CheckpointClosableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    assertTrue(checkpointIterableRule.compare(expected, changes));
+  }
+
   private void setupGetSiteAndWeb(String url, String outputSite, String outputWeb, long result)
       throws IOException {
     doAnswer(
@@ -612,10 +1128,11 @@ public class SharePointRepositoryTest {
         .getSiteAndWeb(eq(url), any(), any());
   }
 
-  private SharePointRepository setUpDefaultRepository() {
+  private SharePointRepository setUpDefaultRepository() throws IOException {
     SharePointRepository repo =
         new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
     overrideConfig(getBaseConfig());
+    setupVirtualServerForInit();
     return repo;
   }
 

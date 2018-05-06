@@ -26,6 +26,14 @@ public class SharePointResponseHelper {
     return loadTestResponse("sites-SiteCollection-Lists-CustomList-f.xml");
   }
 
+  public static String getChangesForSiteCollection() {
+    return loadTestResponse("testModifiedGetDocIdsClient.changes-sc.xml");
+  }
+
+  public static String getChangesForcontentDB() {
+    return loadTestResponse("testModifiedGetDocIdsClient.changes-cd.xml");
+  }
+
   public static String loadTestResponse(String fileName) {
     try {
       return loadResourceAsString("spresponses/" + fileName);
