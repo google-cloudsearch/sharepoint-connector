@@ -14,6 +14,8 @@
 
 package com.google.enterprise.cloud.search.sharepoint;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationMode;
 import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationSoap;
 import com.microsoft.schemas.sharepoint.soap.authentication.LoginErrorCode;
@@ -29,11 +31,10 @@ import javax.xml.ws.WebServiceException;
 import javax.xml.ws.handler.MessageContext;
 
 /**
- * AuthenticationHandler implementation for SharePoint forms authentication
- * using Authentication.asmx web service.
-*/
-public class SharePointFormsAuthenticationHandler 
-    extends FormsAuthenticationHandler {
+ * AuthenticationHandler implementation for SharePoint forms authentication using
+ * Authentication.asmx web service.
+ */
+class SharePointFormsAuthenticationHandler extends FormsAuthenticationHandler {
   private static final Logger log
       = Logger.getLogger(SharePointFormsAuthenticationHandler.class.getName());
   // Default time out for forms authentication with .NET is 30 mins
@@ -41,13 +42,14 @@ public class SharePointFormsAuthenticationHandler
   private final AuthenticationSoap authenticationClient;
   private AuthenticationMode authenticationMode;
 
-  private SharePointFormsAuthenticationHandler(String username, String password,
-      ScheduledExecutorService executor,
-      AuthenticationSoap authenticationClient) {
-    super(username, password, executor);
-    this.authenticationClient = authenticationClient;
+  private SharePointFormsAuthenticationHandler(Builder builder) {
+    super(
+        checkNotNull(builder.username),
+        checkNotNull(builder.password),
+        checkNotNull(builder.executor));
+    this.authenticationClient = checkNotNull(builder.authenticationClient);
   }
-  
+
   public static class Builder {
     private final String username;
     private final String password;
@@ -56,22 +58,15 @@ public class SharePointFormsAuthenticationHandler
     public Builder(String username, String password,
         ScheduledExecutorService executor,
         AuthenticationSoap authenticationClient) {
-      if (username == null || password == null || executor == null
-          || authenticationClient == null) {
-        throw new NullPointerException();        
-      }
       this.username = username;
       this.password = password;
       this.executor = executor;
-      this.authenticationClient = authenticationClient;      
+      this.authenticationClient = authenticationClient;
     }
-    
+
     public SharePointFormsAuthenticationHandler build() {
-      SharePointFormsAuthenticationHandler authenticationHandler
-          = new SharePointFormsAuthenticationHandler(
-              username, password, executor, authenticationClient);
-      return authenticationHandler;
-    }    
+      return new SharePointFormsAuthenticationHandler(this);
+    }
   }
 
   @Override
@@ -88,7 +83,7 @@ public class SharePointFormsAuthenticationHandler
           "Forms authentication failed.", ex);
       log.log(Level.INFO, "Possible SharePoint environment configured to use "
           + "claims based windows integrated authentication. "
-          + "Adaptor will fallback to use windows integrated authentication.");      
+          + "Adaptor will fallback to use windows integrated authentication.");
       return new AuthenticationResult(null, DEFAULT_COOKIE_TIMEOUT_SECONDS,
           LoginErrorCode.NOT_IN_FORMS_AUTHENTICATION_MODE.toString());
     }
@@ -99,7 +94,7 @@ public class SharePointFormsAuthenticationHandler
       log.log(Level.WARNING, "Forms authentication failed with error code {0}. "
           + "Possible SharePoint environment with multiple claims providers. "
           + "Adaptor will fallback to use windows integrated authentication.",
-          result.getErrorCode());      
+          result.getErrorCode());
       return new AuthenticationResult(null, DEFAULT_COOKIE_TIMEOUT_SECONDS,
           result.getErrorCode().toString());
     }
@@ -112,13 +107,13 @@ public class SharePointFormsAuthenticationHandler
     if(!responseHeaders.containsKey("Set-cookie")) {
       throw new IOException("Unable to extract authentication cookie.");
     }
-    
+
     @SuppressWarnings("unchecked")
     List<String> cookies = (List<String>) responseHeaders.get("Set-cookie");
     if (cookies == null || cookies.isEmpty()) {
       throw new IOException("Unable to extract authentication cookie.");
     }
-    
+
     int cookieTimeout;
     // On SP2007 result.getTimeoutSeconds() can be null
     if (result.getTimeoutSeconds() == null) {
@@ -126,27 +121,28 @@ public class SharePointFormsAuthenticationHandler
           "Login cookie timeout is null. Using default cookie timeout.");
       cookieTimeout = DEFAULT_COOKIE_TIMEOUT_SECONDS;
     } else {
-      cookieTimeout = result.getTimeoutSeconds() > 0 
+      cookieTimeout = result.getTimeoutSeconds() > 0
           ? result.getTimeoutSeconds() : DEFAULT_COOKIE_TIMEOUT_SECONDS;
     }
-    
+
     log.log(Level.FINE,
         "Login Cookie Expiration in = {0} seconds", cookieTimeout);
- 
+
     return new AuthenticationResult(cookies.get(0), cookieTimeout,
         result.getErrorCode().toString());
   }
 
+  @Override
   public boolean isFormsAuthentication() throws IOException {
     if (authenticationMode == null) {
-      // Cache authentication mode value to avoid repetitive web service 
-      // calls to get authentication mode.     
+      // Cache authentication mode value to avoid repetitive web service
+      // calls to get authentication mode.
       setAuthenticationMode(authenticationClient.mode());
       log.log(Level.FINE, "Authentication Mode {0}", authenticationMode);
     }
     return authenticationMode == AuthenticationMode.FORMS;
   }
-  
+
   private synchronized void setAuthenticationMode(AuthenticationMode mode) {
     authenticationMode = mode;
   }

@@ -29,28 +29,28 @@ import org.junit.rules.ExpectedException;
 public class SamlAuthenticationHandlerTest {
   @Rule
   public ExpectedException thrown = ExpectedException.none();
-  
+
   @Test
   public void testBuilder() {
     new SamlAuthenticationHandler.Builder("username", "password",
         new UnsupportedScheduledExecutor(),
         new UnsupportedSamlHandshakeManager()).build();
   }
-  
+
   @Test
   public void testNullSamlClient() {
     thrown.expect(NullPointerException.class);
     new SamlAuthenticationHandler.Builder("username", "password",
          new UnsupportedScheduledExecutor(), null).build();
   }
-  
+
   @Test
-  public void testIsFormsAutentication() throws IOException {
+  public void testIsFormsAuthentication() throws IOException {
     assertTrue(new SamlAuthenticationHandler.Builder("username", "password",
         new UnsupportedScheduledExecutor(),
-        new UnsupportedSamlHandshakeManager()).build().isFormsAuthentication());    
+        new UnsupportedSamlHandshakeManager()).build().isFormsAuthentication());
   }
-  
+
   @Test
   public void testNullToken() throws IOException {
     SamlAuthenticationHandler handler = new SamlAuthenticationHandler.Builder(
@@ -58,59 +58,59 @@ public class SamlAuthenticationHandlerTest {
         new MockSamlHandshakeManager(null, null) {
           @Override public String getAuthenticationCookie(String token) {
             throw new UnsupportedOperationException();
-          }      
+          }
         }).build();
-    
+
     assertTrue(handler.isFormsAuthentication());
     thrown.expect(IOException.class);
-    AuthenticationResult result = handler.authenticate();    
+    handler.authenticate();
   }
-  
+
   @Test
-  public void testSAMLAutentication() throws IOException {
-    SamlAuthenticationHandler handler 
-        = new SamlAuthenticationHandler.Builder("username", "password", 
+  public void testSAMLAuthentication() throws IOException {
+    SamlAuthenticationHandler handler
+        = new SamlAuthenticationHandler.Builder("username", "password",
             new MockScheduledExecutor(),
             new MockSamlHandshakeManager("token", "AuthenticationCookie"))
-            .build();    
+            .build();
     assertTrue(handler.isFormsAuthentication());
     AuthenticationResult result = handler.authenticate();
     assertNotNull(result);
     assertEquals("AuthenticationCookie", result.getCookie());
     assertEquals(600, result.getCookieTimeOut());
-    assertEquals("NO_ERROR", result.getErrorCode());    
+    assertEquals("NO_ERROR", result.getErrorCode());
   }
-  
-  private static class UnsupportedSamlHandshakeManager 
+
+  private static class UnsupportedSamlHandshakeManager
       implements SamlHandshakeManager {
     @Override
     public String requestToken() throws IOException {
-      throw new UnsupportedOperationException(); 
+      throw new UnsupportedOperationException();
     }
 
     @Override
     public String getAuthenticationCookie(String token) throws IOException {
       throw new UnsupportedOperationException();
-    }    
+    }
   }
-  
-  private static class MockSamlHandshakeManager 
+
+  private static class MockSamlHandshakeManager
       extends UnsupportedSamlHandshakeManager {
     private String token;
     private String cookie;
     MockSamlHandshakeManager(String token, String cookie) {
       this.token = token;
-      this.cookie = cookie;      
+      this.cookie = cookie;
     }
-    
+
     @Override
     public String requestToken() {
       return token;
     }
-    
+
     @Override
     public String getAuthenticationCookie(String token) throws IOException {
       return cookie;
     }
-  }  
+  }
 }

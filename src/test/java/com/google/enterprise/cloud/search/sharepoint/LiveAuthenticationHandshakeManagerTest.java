@@ -30,8 +30,8 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 public class LiveAuthenticationHandshakeManagerTest {
-  
-  private static final String LIVE_AUTHENTICATION_RESPONSE 
+
+  private static final String LIVE_AUTHENTICATION_RESPONSE
       = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
       + "<S:Envelope xmlns:S=\"http://www.w3.org/2003/05/soap-envelope\" "
       + "xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-"
@@ -88,115 +88,116 @@ public class LiveAuthenticationHandshakeManagerTest {
       + "URI=\"euzZqFurd7rgUGVjTUnCah09kbA=\"></wsse:Reference>"
       + "</wsse:SecurityTokenReference></wst:RequestedUnattachedReference>"
       + "</wst:RequestSecurityTokenResponse></S:Body></S:Envelope>";
-  
+
   @Rule
-  public ExpectedException thrown = ExpectedException.none();  
-  
+  public ExpectedException thrown = ExpectedException.none();
+
   @Test
   public void testConstructor() {
     new LiveAuthenticationHandshakeManager.Builder(
         "http://sharepointurl", "username", "password")
-        .build();    
+        .build();
   }
-  
+
   @Test
   public void testNullUsername() {
     thrown.expect(NullPointerException.class);
     new LiveAuthenticationHandshakeManager.Builder(
         "http://endpoint", null, "password").build();
   }
-  
+
   @Test
   public void testNullPassword() {
     thrown.expect(NullPointerException.class);
     new LiveAuthenticationHandshakeManager.Builder(
         "http://endpoint", "username", null).build();
   }
-  
+
   @Test
   public void testNullSharePointUrl() {
     thrown.expect(NullPointerException.class);
     new LiveAuthenticationHandshakeManager.Builder(
         null, "username", "password").build();
   }
-  
+
   @Test
   public void testExtractToken() throws IOException {
-    LiveAuthenticationHandshakeManager manager 
+    LiveAuthenticationHandshakeManager manager
         = new LiveAuthenticationHandshakeManager.Builder(
-            "https://sharepoint.example.com", "username", "password").build();    
-    
+            "https://sharepoint.example.com", "username", "password").build();
+
     assertEquals("t=This is live authentication token to extract",
         manager.extractToken(LIVE_AUTHENTICATION_RESPONSE));
-  }  
-  
+  }
+
   @Test
   public void testExtractTokenWithInvalidInput() throws IOException {
-    LiveAuthenticationHandshakeManager manager 
+    LiveAuthenticationHandshakeManager manager
         = new LiveAuthenticationHandshakeManager.Builder(
             "https://sharepoint.example.com", "username", "password").build();
-    
+
     String tokenResponse = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
-        + "<S:Envelope xmlns:S=\"http://www.w3.org/2003/05/soap-envelope\">"       
+        + "<S:Envelope xmlns:S=\"http://www.w3.org/2003/05/soap-envelope\">"
         + "<data>Something went wrong this is invalid</data>"
         + "</S:Envelope>";
-    
+
     thrown.expect(IOException.class);
-    String extractedToken = manager.extractToken(tokenResponse);   
+    manager.extractToken(tokenResponse);
   }
-  
+
   @Test
   public void testExtractTokenWithNullInput() throws IOException {
-    LiveAuthenticationHandshakeManager manager 
+    LiveAuthenticationHandshakeManager manager
         = new LiveAuthenticationHandshakeManager.Builder(
             "https://sharepoint.example.com", "username", "password").build();
     thrown.expect(IOException.class);
-    String extractedToken = manager.extractToken(null);   
+    manager.extractToken(null);
   }
-  
+
   @Test
   public void testAuthenticateInSamlHandlerWithLive() throws IOException{
-    MockHttpPostClient postClient = new MockHttpPostClient();    
-    LiveAuthenticationHandshakeManager manager 
-        = new LiveAuthenticationHandshakeManager.Builder(
-        "https://sharepoint.example.com", "username@domain", "password&123",
-        postClient).build();
+    MockHttpPostClient postClient = new MockHttpPostClient();
+    LiveAuthenticationHandshakeManager manager =
+        new LiveAuthenticationHandshakeManager.Builder(
+                "https://sharepoint.example.com", "username@domain", "password&123")
+            .setHttpClient(postClient)
+            .build();
     URL tokenRequest = new URL(
-        "https://login.microsoftonline.com/extSTS.srf");   
+        "https://login.microsoftonline.com/extSTS.srf");
     postClient.responseMap.put(tokenRequest,
-        new PostResponseInfo(LIVE_AUTHENTICATION_RESPONSE, null));    
+        new PostResponseInfo(LIVE_AUTHENTICATION_RESPONSE, null));
     URL submitToken = new URL(
-        "https://sharepoint.example.com/_forms/default.aspx?wa=wsignin1.0");    
-    Map<String, List<String>> responseHeaders 
+        "https://sharepoint.example.com/_forms/default.aspx?wa=wsignin1.0");
+    Map<String, List<String>> responseHeaders
         = new HashMap<String, List<String>>();
     responseHeaders.put("some-header", Arrays.asList("some value"));
     responseHeaders.put("Set-Cookie",
         Arrays.asList("FedAuth=AutheCookie", "rfta=rftaValue"));
-    
+
     postClient.responseMap.put(submitToken,
         new PostResponseInfo(null, responseHeaders));
-    
-    SamlAuthenticationHandler authenticationHandler 
+
+    SamlAuthenticationHandler authenticationHandler
         = new SamlAuthenticationHandler.Builder("username@domain",
             "password&123", new MockScheduledExecutor(), manager).build();
     AuthenticationResult result = authenticationHandler.authenticate();
-    
+
     assertEquals("FedAuth=AutheCookie;rfta=rftaValue;", result.getCookie());
     assertEquals("NO_ERROR", result.getErrorCode());
-    assertEquals(600, result.getCookieTimeOut());    
+    assertEquals(600, result.getCookieTimeOut());
   }
-  
-  
+
+
   private static class MockHttpPostClient implements HttpPostClient {
 
     private Map<URL, SamlAuthenticationHandler.PostResponseInfo> responseMap;
     private Map<URL, String> receivedRequestBodyMap;
     public MockHttpPostClient() {
       responseMap = new HashMap<URL, PostResponseInfo>();
-      receivedRequestBodyMap = new HashMap<URL, String>();      
+      receivedRequestBodyMap = new HashMap<URL, String>();
     }
-    
-    @Override    
+
+    @Override
     public PostResponseInfo issuePostRequest(
         URL url, Map<String, String> connectionProperties, String requestBody)
         throws IOException {
@@ -208,5 +209,5 @@ public class LiveAuthenticationHandshakeManagerTest {
       receivedRequestBodyMap.put(url, requestBody);
       return responseMap.get(url);
     }
-  }  
+  }
 }

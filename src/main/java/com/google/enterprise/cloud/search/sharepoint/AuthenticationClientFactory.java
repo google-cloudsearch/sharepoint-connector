@@ -14,29 +14,28 @@
 
 package com.google.enterprise.cloud.search.sharepoint;
 
-
-import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
-import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationSoap;
-
-import java.io.IOException;
-import java.util.Map;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
- * Authentication Factory to return appropriate authentication client for
- * FormsAuthenticationHandler implementation.
+ * Authentication Factory to return appropriate authentication client for FormsAuthenticationHandler
+ * implementation.
  */
-public interface AuthenticationClientFactory {  
-  public AuthenticationSoap newSharePointFormsAuthentication(
-      String virtualServer, String username, String password)
-      throws IOException;
+interface AuthenticationClientFactory {
+  /**
+   * Initialize {@link AuthenticationClientFactory}
+   *
+   * @param virtualServer SharePoint virtual server URL
+   * @param username SharePoint user account
+   * @param password SharePoint user password
+   * @param executor schedule executor service to periodically refresh authentication tokens
+   */
+  void init(
+      String virtualServer, String username, String password, ScheduledExecutorService executor);
 
-  public SamlHandshakeManager newAdfsAuthentication(String virtualServer,
-      String username, String password, String stsendpoint, String stsrealm,
-      String login, String trustlocation) throws IOException;
-
-  public SamlHandshakeManager newLiveAuthentication(String virtualServer,
-      String username, String password) throws IOException;
-  
-  public SamlHandshakeManager newCustomSamlAuthentication(
-      String factoryMethodName, Map<String, String> config) throws IOException;
+  /**
+   * Get an instance of {@link FormsAuthenticationHandler}
+   *
+   * @return an instance of {@link FormsAuthenticationHandler}
+   */
+  FormsAuthenticationHandler getFormsAuthenticationHandler();
 }

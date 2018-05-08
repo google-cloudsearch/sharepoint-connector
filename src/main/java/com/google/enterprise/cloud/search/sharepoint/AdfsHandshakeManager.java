@@ -15,6 +15,9 @@
 
 package com.google.enterprise.cloud.search.sharepoint;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.google.enterprise.cloud.search.sharepoint.SamlAuthenticationHandler.HttpPostClient;
@@ -30,7 +33,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -40,7 +42,6 @@ import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -48,16 +49,16 @@ import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 /**
- * SamlHandshakeManager implementation to support ADFS 2.0 
- * to request ADFS authentication token and extract authentication cookie.
+ * SamlHandshakeManager implementation to support ADFS 2.0 to request ADFS authentication token and
+ * extract authentication cookie.
  */
-public class AdfsHandshakeManager implements SamlHandshakeManager {
+class AdfsHandshakeManager implements SamlHandshakeManager {
   private static final Logger log
       = Logger.getLogger(AdfsHandshakeManager.class.getName());
-  
+
   private static final String DEFAULT_LOGIN = "/_layouts/Authenticate.aspx";
   private static final String DEFAULT_TRUST = "/_trust";
-  
+
   protected final String login;
   protected final String username;
   protected final String password;
@@ -97,18 +98,15 @@ public class AdfsHandshakeManager implements SamlHandshakeManager {
       + "<t:TokenType>urn:oasis:names:tc:SAML:1.0:assertion</t:TokenType>"
       + "</t:RequestSecurityToken></s:Body></s:Envelope>";
 
-  @VisibleForTesting
-  AdfsHandshakeManager(String sharePointUrl, String username,
-      String password, String stsendpoint, String stsrealm, String login,
-      String trustLocation, HttpPostClient httpClient) {
-    this.sharePointUrl = sharePointUrl;
-    this.username = username;
-    this.password = password;
-    this.stsendpoint = stsendpoint;
-    this.stsrealm = stsrealm;
-    this.login = login;
-    this.trustLocation = trustLocation;
-    this.httpClient = httpClient;
+  protected AdfsHandshakeManager(Builder builder) {
+    this.sharePointUrl = checkNotNullOrEmpty(builder.sharePointUrl);
+    this.username = checkNotNullOrEmpty(builder.username);
+    this.password = checkNotNullOrEmpty(builder.password);
+    this.stsendpoint = checkNotNullOrEmpty(builder.stsendpoint);
+    this.stsrealm = checkNotNullOrEmpty(builder.stsrealm);
+    this.login = checkNotNullOrEmpty(builder.login);
+    this.trustLocation = checkNotNull(builder.trustLocation);
+    this.httpClient = checkNotNull(builder.httpClient);
   }
 
   public static class Builder {
@@ -117,57 +115,46 @@ public class AdfsHandshakeManager implements SamlHandshakeManager {
     private final String sharePointUrl;
     private final String stsendpoint;
     private final String stsrealm;
-    private final HttpPostClient httpClient;
+    private HttpPostClient httpClient;
     private String login;
-    private String trustLocation;    
+    private String trustLocation;
 
     public Builder(String sharePointUrl, String username,
       String password, String stsendpoint, String stsrealm) {
-      this(sharePointUrl, username, password, stsendpoint, stsrealm,
-          new HttpPostClientImpl());
-    }
-
-    @VisibleForTesting
-    Builder(String sharePointUrl, String username,
-      String password, String stsendpoint, String stsrealm,
-      HttpPostClient httpClient) {
-      if (sharePointUrl == null || username == null || password == null
-          || stsendpoint == null || httpClient == null || stsrealm == null) {
-        throw new NullPointerException();
-      }
       this.sharePointUrl = sharePointUrl;
       this.username = username;
       this.password = password;
       this.stsendpoint = stsendpoint;
       this.stsrealm = stsrealm;
-      this.httpClient = httpClient;
-      this.login = sharePointUrl + DEFAULT_LOGIN;
+      this.httpClient = new HttpPostClientImpl();
       this.trustLocation = sharePointUrl + DEFAULT_TRUST;
+      this.login = sharePointUrl + DEFAULT_LOGIN;
     }
 
-    public Builder setLoginUrl(String login) {      
+    public Builder setLoginUrl(String login) {
       this.login = login;
       return this;
     }
 
-    public Builder setTrustLocation(String trustLocation) {      
+    public Builder setTrustLocation(String trustLocation) {
       this.trustLocation = trustLocation;
       return this;
     }
 
+    @VisibleForTesting
+    Builder setHttpClient(HttpPostClient httpClient) {
+      this.httpClient = httpClient;
+      return this;
+    }
+
     public AdfsHandshakeManager build() {
-      if (Strings.isNullOrEmpty(trustLocation) 
-          || Strings.isNullOrEmpty(login)) {
-        throw new NullPointerException();
-      }
-      return new AdfsHandshakeManager(sharePointUrl, username,
-          password, stsendpoint, stsrealm, login, trustLocation, httpClient);
+      return new AdfsHandshakeManager(this);
     }
   }
 
   @Override
   public String requestToken() throws IOException {
-    String saml = generateSamlRequest();    
+    String saml = generateSamlRequest();
     URL u = new URL(stsendpoint);
     Map<String, String> requestHeaders = new HashMap<String, String>();
     requestHeaders.put("SOAPAction", stsendpoint);
@@ -180,7 +167,7 @@ public class AdfsHandshakeManager implements SamlHandshakeManager {
   }
 
   @Override
-  public String getAuthenticationCookie(String token) throws IOException {    
+  public String getAuthenticationCookie(String token) throws IOException {
     URL u = new URL(trustLocation);
     String param = "wa=wsignin1.0"
         + "&wctx=" + URLEncoder.encode(login,"UTF-8")
@@ -196,7 +183,7 @@ public class AdfsHandshakeManager implements SamlHandshakeManager {
 
   private String generateSamlRequest() {
     return String.format(reqXML, escapeCdata(stsendpoint),
-        escapeCdata(username), escapeCdata(password), escapeCdata(stsrealm));   
+        escapeCdata(username), escapeCdata(password), escapeCdata(stsrealm));
   }
 
   @VisibleForTesting
@@ -208,7 +195,7 @@ public class AdfsHandshakeManager implements SamlHandshakeManager {
       DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
       dbf.setNamespaceAware(true);
       DocumentBuilder db = dbf.newDocumentBuilder();
-      Document document 
+      Document document
           = db.parse(new InputSource(new StringReader(tokenResponse)));
       NodeList nodes
           = document.getElementsByTagNameNS(
@@ -224,7 +211,7 @@ public class AdfsHandshakeManager implements SamlHandshakeManager {
       log.log(Level.FINER, "ADFS Authentication Token {0}", token);
       return token;
     } catch (ParserConfigurationException ex) {
-      throw new IOException("Error parsing result", ex);      
+      throw new IOException("Error parsing result", ex);
     } catch (SAXException ex) {
       throw new IOException("Error parsing result", ex);
     }
@@ -232,7 +219,7 @@ public class AdfsHandshakeManager implements SamlHandshakeManager {
 
   private String getOuterXml(Node node) throws IOException {
     try {
-      Transformer transformer 
+      Transformer transformer
           = TransformerFactory.newInstance().newTransformer();
       transformer.setOutputProperty("omit-xml-declaration", "yes");
       StringWriter writer = new StringWriter();
@@ -244,12 +231,18 @@ public class AdfsHandshakeManager implements SamlHandshakeManager {
       throw new IOException(ex);
     }
   }
-  
+
   @VisibleForTesting
   String escapeCdata(String input) {
     if (Strings.isNullOrEmpty(input)) {
       return "";
-    }  
+    }
     return "<![CDATA[" + input.replace("]]>", "]]]]><![CDATA[>") + "]]>";
+  }
+
+  private static String checkNotNullOrEmpty(String input) {
+    checkNotNull(input);
+    checkArgument(!input.isEmpty());
+    return input;
   }
 }

@@ -25,13 +25,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-
 /** Helper class to handle forms authentication. */
-public abstract class FormsAuthenticationHandler {
+abstract class FormsAuthenticationHandler {
   /** SharePoint's namespace. */
   private static final String XMLNS
       = "http://schemas.microsoft.com/sharepoint/soap/";
-  
+
   private static final Logger log
       = Logger.getLogger(FormsAuthenticationHandler.class.getName());
   // Default time out for forms authentication with .NET is 30 mins
@@ -40,12 +39,12 @@ public abstract class FormsAuthenticationHandler {
   protected final String username;
   protected final String password;
   private final ScheduledExecutorService executor;
-  private final Runnable refreshRunnable = new RefreshRunnable();  
-  private final List<String> authenticationCookiesList 
-      = new CopyOnWriteArrayList<String>();  
+  private final Runnable refreshRunnable = new RefreshRunnable();
+  private final List<String> authenticationCookiesList
+      = new CopyOnWriteArrayList<String>();
   private boolean isFormsAuthentication = false;
 
-  @VisibleForTesting    
+  @VisibleForTesting
   FormsAuthenticationHandler(String username, String password,
       ScheduledExecutorService executor) {
     if (username == null || password == null || executor == null) {
@@ -53,7 +52,7 @@ public abstract class FormsAuthenticationHandler {
     }
     this.username = username;
     this.password = password;
-    this.executor = executor;   
+    this.executor = executor;
   }
 
   public List<String> getAuthenticationCookies() {
@@ -61,13 +60,13 @@ public abstract class FormsAuthenticationHandler {
   }
   // TODO : Remove isFormAuthentication.
   abstract boolean isFormsAuthentication() throws IOException;
-  
+
   abstract AuthenticationResult authenticate() throws IOException;
-  
+
   private void refreshCookies() throws IOException {
-    
+
     if ("".equals(username) || "".equals(password)) {
-      log.log(Level.FINE, 
+      log.log(Level.FINE,
           "Empty username / password. Using authentication mode as Windows");
        isFormsAuthentication = false;
        return;
@@ -97,9 +96,9 @@ public abstract class FormsAuthenticationHandler {
     long rerunAfter = (cookieTimeOut + 1) / 2;
     executor.schedule(refreshRunnable, rerunAfter, TimeUnit.SECONDS);
     log.log(Level.FINEST,
-        "Authentication Cookie is {0}", authenticationCookiesList);   
+        "Authentication Cookie is {0}", authenticationCookiesList);
  }
- 
+
   public void start() throws IOException {
     if ("".equals(username) || "".equals(password)) {
       log.log(Level.FINE, "Empty username or password. Using windows"
@@ -117,8 +116,8 @@ public abstract class FormsAuthenticationHandler {
       try {
         refreshCookies();
       } catch(IOException ex) {
-        log.log(Level.WARNING, 
-            "Error refreshing forms authentication cookies", ex);        
+        log.log(Level.WARNING,
+            "Error refreshing forms authentication cookies", ex);
         executor.schedule(this, 5, TimeUnit.MINUTES);
       }
     }

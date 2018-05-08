@@ -14,6 +14,8 @@
 
 package com.google.enterprise.cloud.search.sharepoint;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import java.io.IOException;
@@ -33,10 +35,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/**
- * FormsAuthenticationHandler for SAML based authentication.
- */
-public class SamlAuthenticationHandler extends FormsAuthenticationHandler {
+/** FormsAuthenticationHandler for SAML based authentication. */
+class SamlAuthenticationHandler extends FormsAuthenticationHandler {
 
   private static final Logger log
       = Logger.getLogger(SamlAuthenticationHandler.class.getName());
@@ -45,12 +45,14 @@ public class SamlAuthenticationHandler extends FormsAuthenticationHandler {
 
   private final SamlHandshakeManager samlClient;
 
-  private SamlAuthenticationHandler(String username, String password,
-      ScheduledExecutorService executor, SamlHandshakeManager samlClient) {
-    super(username, password, executor);
-    this.samlClient = samlClient;
+  private SamlAuthenticationHandler(Builder builder) {
+    super(
+        checkNotNull(builder.username),
+        checkNotNull(builder.password),
+        checkNotNull(builder.executor));
+    this.samlClient = checkNotNull(builder.samlClient);
   }
-  
+
   public static class Builder {
     private final String username;
     private final String password;
@@ -58,23 +60,16 @@ public class SamlAuthenticationHandler extends FormsAuthenticationHandler {
     private final SamlHandshakeManager samlClient;
     public Builder(String username, String password,
         ScheduledExecutorService executor, SamlHandshakeManager samlClient) {
-      if (username == null || password == null || executor == null
-          || samlClient == null) {
-        throw new NullPointerException();        
-      }
       this.username = username;
       this.password = password;
       this.executor = executor;
-      this.samlClient = samlClient;      
+      this.samlClient = samlClient;
     }
-    
+
     public SamlAuthenticationHandler build() {
-      SamlAuthenticationHandler authenticationHandler
-          = new SamlAuthenticationHandler(username, password, executor,
-              samlClient);      
-      return authenticationHandler;
+      return new SamlAuthenticationHandler(this);
     }
-    
+
   }
 
   @Override
@@ -82,7 +77,7 @@ public class SamlAuthenticationHandler extends FormsAuthenticationHandler {
     String token = samlClient.requestToken();
     if (Strings.isNullOrEmpty(token)) {
       throw new IOException("Invalid SAML token");
-    }    
+    }
     String cookie = samlClient.getAuthenticationCookie(token);
     log.log(Level.FINER, "Authentication Cookie {0}", cookie);
     return new AuthenticationResult(cookie,
@@ -153,14 +148,12 @@ public class SamlAuthenticationHandler extends FormsAuthenticationHandler {
         }
       }
     }
-    
+
     private String readInputStreamToString(InputStream in, Charset charset) {
       // TODO(tvartak): Auto-generated method stub
       return null;
     }
   }
-  
-
 
   @VisibleForTesting
   public static class PostResponseInfo {
@@ -173,7 +166,7 @@ public class SamlAuthenticationHandler extends FormsAuthenticationHandler {
         String contents, Map<String, List<String>> headers) {
       this.contents = contents;
       this.headers  = (headers == null)
-          ? new HashMap<String, List<String>>() 
+          ? new HashMap<String, List<String>>()
           : new HashMap<String, List<String>>(headers);
     }
 

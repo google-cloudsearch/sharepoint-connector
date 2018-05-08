@@ -22,7 +22,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** Immutable lookup from identifier to name for users and groups. */
-public class MemberIdMapping {
+class MemberIdMapping {
   private static final Interner<Principal> interner
       = Interners.newWeakInterner();
 

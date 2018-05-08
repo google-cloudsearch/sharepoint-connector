@@ -29,19 +29,19 @@ public class FileInfoTest {
   }
 
   @Test
-  public void testNullContent() throws IOException {
+  public void testNullContent() {
     thrown.expect(NullPointerException.class);
     new FileInfo.Builder(null).build();
   }
 
   @Test
-  public void testNullHeaders() throws IOException {
+  public void testNullHeaders() {
     thrown.expect(NullPointerException.class);
     new FileInfo.Builder(new ByteArrayInputStream("golden".getBytes())).setHeaders(null).build();
   }
 
   @Test
-  public void testDuplicateHeaders() throws IOException {
+  public void testDuplicateHeaders() {
     ImmutableList<FileInfo.FileHeader> headers =
         new ImmutableList.Builder<FileInfo.FileHeader>()
             .add(new FileHeader("some-header", "some-value"))

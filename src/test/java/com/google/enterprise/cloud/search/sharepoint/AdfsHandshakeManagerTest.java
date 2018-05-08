@@ -32,28 +32,19 @@ import org.junit.rules.ExpectedException;
 
 
 public class AdfsHandshakeManagerTest {
-  
+
   @Rule
   public ExpectedException thrown = ExpectedException.none();
-  
-  private static class UnsupportedHttpPostClient implements HttpPostClient {
-    @Override
-    public SamlAuthenticationHandler.PostResponseInfo issuePostRequest(
-        URL url, Map<String, String> connectionProperties, String requestBody)
-        throws IOException {
-      throw new UnsupportedOperationException();
-    }    
-  }
-  
+
   private static class MockHttpPostClient implements HttpPostClient {
 
     private Map<URL, PostResponseInfo> responseMap;
     private Map<URL, String> receivedRequestBodyMap;
     public MockHttpPostClient() {
       responseMap = new HashMap<URL, PostResponseInfo>();
-      receivedRequestBodyMap = new HashMap<URL, String>();      
+      receivedRequestBodyMap = new HashMap<URL, String>();
     }
-    
+
     @Override
     public SamlAuthenticationHandler.PostResponseInfo issuePostRequest(
         URL url, Map<String, String> connectionProperties, String requestBody)
@@ -72,7 +63,7 @@ public class AdfsHandshakeManagerTest {
   public void testConstructor() {
     new AdfsHandshakeManager.Builder(
         "http://endpoint", "username", "password", "https://sts", "realm")
-        .build();    
+        .build();
   }
 
   @Test
@@ -113,10 +104,15 @@ public class AdfsHandshakeManagerTest {
   @Test
   public void testRequestToken() throws IOException{
     MockHttpPostClient postClient = new MockHttpPostClient();
-    AdfsHandshakeManager manager = new AdfsHandshakeManager.Builder(
-        "https://sharepoint.intranet.com", "username@domain", "pass]]>word&123", 
-        "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed",
-        "urn:realm:sharepoint", postClient).build();
+    AdfsHandshakeManager manager =
+        new AdfsHandshakeManager.Builder(
+                "https://sharepoint.intranet.com",
+                "username@domain",
+                "pass]]>word&123",
+                "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed",
+                "urn:realm:sharepoint")
+            .setHttpClient(postClient)
+            .build();
     URL tokenRequest = new URL(
         "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed");
     String tokenResponse = "<s:Envelope "
@@ -125,16 +121,16 @@ public class AdfsHandshakeManagerTest {
         + "<t:RequestSecurityTokenResponse "
         + "xmlns:t=\"http://schemas.xmlsoap.org/ws/2005/02/trust\">"
         + "This is requested token"
-        + "</t:RequestSecurityTokenResponse>"        
+        + "</t:RequestSecurityTokenResponse>"
         + "</s:Envelope>";
     postClient.responseMap.put(tokenRequest,
-        new PostResponseInfo(tokenResponse, null));    
+        new PostResponseInfo(tokenResponse, null));
     assertEquals("<t:RequestSecurityTokenResponse "
         + "xmlns:t=\"http://schemas.xmlsoap.org/ws/2005/02/trust\">"
         + "This is requested token"
         + "</t:RequestSecurityTokenResponse>", manager.requestToken());
 
-    String expectedRequestBody 
+    String expectedRequestBody
         = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
         + "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\" "
         + "xmlns:a=\"http://www.w3.org/2005/08/addressing\" "
@@ -166,35 +162,45 @@ public class AdfsHandshakeManagerTest {
 
     assertEquals(expectedRequestBody,
         postClient.receivedRequestBodyMap.get(tokenRequest));
-    
+
   }
 
   @Test
-  public void testNullRequestToken() throws IOException{    
-    MockHttpPostClient postClient = new MockHttpPostClient();    
-    AdfsHandshakeManager manager = new AdfsHandshakeManager.Builder(
-        "https://sharepoint.intranet.com", "username@domain", "password&123", 
-        "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed",
-        "urn:realm:sharepoint", postClient).build();
+  public void testNullRequestToken() throws IOException{
+    MockHttpPostClient postClient = new MockHttpPostClient();
+    AdfsHandshakeManager manager =
+        new AdfsHandshakeManager.Builder(
+                "https://sharepoint.intranet.com",
+                "username@domain",
+                "password&123",
+                "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed",
+                "urn:realm:sharepoint")
+            .setHttpClient(postClient)
+            .build();
     URL tokenRequest = new URL(
         "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed");
     postClient.responseMap.put(tokenRequest,
         new PostResponseInfo("<data>some invalid content</data>", null));
     thrown.expect(IOException.class);
-    String token = manager.requestToken();    
+    String token = manager.requestToken();
   }
 
   @Test
   public void testGetAuthenticationCookie() throws IOException{
-    MockHttpPostClient postClient = new MockHttpPostClient();    
-    AdfsHandshakeManager manager = new AdfsHandshakeManager.Builder(
-        "https://sharepoint.intranet.com", "username@domain", "password&123", 
-        "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed",
-        "urn:realm:sharepoint", postClient).build();   
+    MockHttpPostClient postClient = new MockHttpPostClient();
+    AdfsHandshakeManager manager =
+        new AdfsHandshakeManager.Builder(
+                "https://sharepoint.intranet.com",
+                "username@domain",
+                "password&123",
+                "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed",
+                "urn:realm:sharepoint")
+            .setHttpClient(postClient)
+            .build();
 
     URL submitToken = new URL("https://sharepoint.intranet.com/_trust");
 
-    Map<String, List<String>> responseHeaders 
+    Map<String, List<String>> responseHeaders
         = new HashMap<String, List<String>>();
     responseHeaders.put("some-header", Arrays.asList("some value"));
     responseHeaders.put("Set-Cookie", Arrays.asList("FedAuth=AutheCookie"));
@@ -209,13 +215,13 @@ public class AdfsHandshakeManagerTest {
 
     assertEquals("FedAuth=AutheCookie;", cookie);
 
-    String expectedSubmitTokenRequest = "wa=wsignin1.0&wctx=" 
+    String expectedSubmitTokenRequest = "wa=wsignin1.0&wctx="
       + URLEncoder.encode("https://sharepoint.intranet.com/_layouts/"
           + "Authenticate.aspx","UTF-8")
       + "&wresult=" + URLEncoder.encode("<t:RequestSecurityTokenResponse "
           + "xmlns:t=\"http://schemas.xmlsoap.org/ws/2005/02/trust\">"
           + "This is requested token"
-          + "</t:RequestSecurityTokenResponse>", "UTF-8");  
+          + "</t:RequestSecurityTokenResponse>", "UTF-8");
     assertEquals(expectedSubmitTokenRequest,
         postClient.receivedRequestBodyMap.get(submitToken));
   }
@@ -225,10 +231,15 @@ public class AdfsHandshakeManagerTest {
     MockHttpPostClient postClient = new MockHttpPostClient();
     String username = "username@domain";
     String password = "password&123";
-    AdfsHandshakeManager manager = new AdfsHandshakeManager.Builder(
-        "https://sharepoint.intranet.com", username, password, 
-        "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed",
-        "urn:realm:sharepoint", postClient).build();
+    AdfsHandshakeManager manager =
+        new AdfsHandshakeManager.Builder(
+                "https://sharepoint.intranet.com",
+                username,
+                password,
+                "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed",
+                "urn:realm:sharepoint")
+            .setHttpClient(postClient)
+            .build();
     URL tokenRequest = new URL(
         "https://sts.dmain.com/adfs/services/trust/2005/usernamemixed");
     String tokenResponse = "<s:Envelope "
@@ -237,12 +248,12 @@ public class AdfsHandshakeManagerTest {
         + "<t:RequestSecurityTokenResponse "
         + "xmlns:t=\"http://schemas.xmlsoap.org/ws/2005/02/trust\">"
         + "This is requested token"
-        + "</t:RequestSecurityTokenResponse>"        
+        + "</t:RequestSecurityTokenResponse>"
         + "</s:Envelope>";
     postClient.responseMap.put(tokenRequest,
-        new PostResponseInfo(tokenResponse, null));    
-    URL submitToken = new URL("https://sharepoint.intranet.com/_trust");    
-    Map<String, List<String>> responseHeaders 
+        new PostResponseInfo(tokenResponse, null));
+    URL submitToken = new URL("https://sharepoint.intranet.com/_trust");
+    Map<String, List<String>> responseHeaders
         = new HashMap<String, List<String>>();
     responseHeaders.put("some-header", Arrays.asList("some value"));
     responseHeaders.put("Set-Cookie", Arrays.asList("FedAuth=AutheCookie"));
@@ -250,14 +261,14 @@ public class AdfsHandshakeManagerTest {
     postClient.responseMap.put(submitToken,
         new PostResponseInfo(null, responseHeaders));
 
-    SamlAuthenticationHandler authenticationHandler 
+    SamlAuthenticationHandler authenticationHandler
         = new SamlAuthenticationHandler.Builder(username, password,
             new MockScheduledExecutor(), manager).build();
     AuthenticationResult result = authenticationHandler.authenticate();
 
     assertEquals("FedAuth=AutheCookie;", result.getCookie());
     assertEquals("NO_ERROR", result.getErrorCode());
-    assertEquals(600, result.getCookieTimeOut());    
+    assertEquals(600, result.getCookieTimeOut());
   }
 
   @Test
@@ -283,7 +294,7 @@ public class AdfsHandshakeManagerTest {
          manager.escapeCdata("]]>"));
 
      assertEquals("<![CDATA[<![CDATA[This is simple]]]]><![CDATA[>]]>",
-         manager.escapeCdata("<![CDATA[This is simple]]>"));    
+         manager.escapeCdata("<![CDATA[This is simple]]>"));
 
      assertEquals("<![CDATA[This is simple]]]]>"
          + "<![CDATA[>with multiple]]]]><![CDATA[>]]>",

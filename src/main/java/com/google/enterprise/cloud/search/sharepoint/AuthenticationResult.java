@@ -15,7 +15,7 @@
 
 package com.google.enterprise.cloud.search.sharepoint;
 
-public class AuthenticationResult {
+class AuthenticationResult {
   private final String cookie;
   private final int cookieTimeOut;
   private final String errorCode;
@@ -27,7 +27,7 @@ public class AuthenticationResult {
     }
     this.cookie = cookie;
     this.cookieTimeOut = cookieTimeOut;
-    this.errorCode = errorCode;      
+    this.errorCode = errorCode;
   }
 
   public String getCookie() {
