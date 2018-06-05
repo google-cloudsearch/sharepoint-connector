@@ -9,10 +9,12 @@
 
   <name>google-cloud-search-sharepoint-connector</name>
   <url>http://maven.apache.org</url>
-
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <java_version>1.8</java_version>
+    <wsdlLocation>
+      src/main/resources/com/google/enterprise/cloud/search/sharepoint/wsdl
+    </wsdlLocation>
   </properties>
   <build>
     <plugins>
@@ -43,11 +45,10 @@
               <goal>wsimport</goal>
             </goals>
             <configuration>
+              <wsdlDirectory>${wsdlLocation}</wsdlDirectory>
               <wsdlFiles>
                 <wsdlFile>SiteData.wsdl</wsdlFile>
                 <wsdlFile>UserGroup.wsdl</wsdlFile>
-                <wsdlFile>UserProfileChangeService.wsdl</wsdlFile>
-                <wsdlFile>UserProfileService.wsdl</wsdlFile>
               </wsdlFiles>
               <!-- Keep generated files -->
               <keep>true</keep>
@@ -61,6 +62,7 @@
               <goal>wsimport</goal>
             </goals>
             <configuration>
+              <wsdlDirectory>${wsdlLocation}</wsdlDirectory>
               <wsdlFiles>
                 <wsdlFile>People.wsdl</wsdlFile>
               </wsdlFiles>
@@ -77,6 +79,7 @@
               <goal>wsimport</goal>
             </goals>
             <configuration>
+              <wsdlDirectory>${wsdlLocation}</wsdlDirectory>
               <wsdlFiles>
                 <wsdlFile>Authentication.wsdl</wsdlFile>
               </wsdlFiles>

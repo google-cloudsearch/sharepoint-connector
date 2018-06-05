@@ -66,7 +66,7 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
   public AuthenticationClientFactoryImpl() {
     this.authenticationService =
         Service.create(
-            AuthenticationSoap.class.getResource("/Authentication.wsdl"),
+            AuthenticationClientFactoryImpl.class.getResource("wsdl/Authentication.wsdl"),
             new QName(XMLNS, "Authentication"));
     authenticationHandler = new AtomicReference<>();
   }

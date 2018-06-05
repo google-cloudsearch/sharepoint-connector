@@ -51,7 +51,7 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
     requestContext.addContext((BindingProvider) siteDataSoap);
     requestContext.addContext((BindingProvider) userGroupSoap);
     requestContext.addContext((BindingProvider) peopleSoap);
-    
+
     siteConnector =
         new SiteConnector.Builder(site, web)
             .setSiteDataClient(new SiteDataClient(siteDataSoap, xmlValidation))
@@ -79,7 +79,7 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
     }
     return url.substring(0, url.length() - 1);
   }
-  
+
   @VisibleForTesting
   static class SoapFactoryImpl implements SoapFactory {
     private final Service siteDataService;
@@ -90,10 +90,11 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
       this.siteDataService = SiteDataClient.createSiteDataService();
       this.userGroupService =
           Service.create(
-              UserGroupSoap.class.getResource("/UserGroup.wsdl"),
+              SiteDataClient.class.getResource("wsdl/UserGroup.wsdl"),
               new QName(XMLNS_DIRECTORY, "UserGroup"));
       this.peopleService =
-          Service.create(PeopleSoap.class.getResource("/People.wsdl"), new QName(XMLNS, "People"));
+          Service.create(
+              SiteDataClient.class.getResource("wsdl/People.wsdl"), new QName(XMLNS, "People"));
     }
 
     private static String handleEncoding(String endpoint) {

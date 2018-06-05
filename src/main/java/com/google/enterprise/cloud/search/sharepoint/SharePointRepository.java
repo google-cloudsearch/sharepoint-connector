@@ -29,8 +29,8 @@ import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
-import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointClosableIterable;
-import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointClosableIterableImpl;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointCloseableIterable;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointCloseableIterableImpl;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.Repository;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryContext;
@@ -308,18 +308,18 @@ public class SharePointRepository implements Repository {
   }
 
   @Override
-  public CheckpointClosableIterable getIds(byte[] checkpoint) throws RepositoryException {
+  public CheckpointCloseableIterable getIds(byte[] checkpoint) throws RepositoryException {
     log.entering("SharePointConnector", "traverse");
     Collection<ApiOperation> toReturn =
         sharepointConfiguration.isSiteCollectionUrl()
             ? getDocIdsSiteCollectionOnly()
             : getDocIdsVirtualServer();
     log.exiting("SharePointConnector", "traverse");
-    return new CheckpointClosableIterableImpl.Builder(toReturn).build();
+    return new CheckpointCloseableIterableImpl.Builder(toReturn).build();
   }
 
   @Override
-  public CheckpointClosableIterable getChanges(byte[] checkpoint) throws RepositoryException {
+  public CheckpointCloseableIterable getChanges(byte[] checkpoint) throws RepositoryException {
     SharePointIncrementalCheckpoint previousCheckpoint;
     try {
       Optional<SharePointIncrementalCheckpoint> parsedCheckpoint =
@@ -371,7 +371,7 @@ public class SharePointRepository implements Repository {
     }
   }
 
-  private CheckpointClosableIterable getChangesSiteCollectionOnlyMode(
+  private CheckpointCloseableIterable getChangesSiteCollectionOnlyMode(
       SharePointIncrementalCheckpoint previous, SharePointIncrementalCheckpoint current)
       throws IOException {
     Map<DiffKind, Set<String>> diff = previous.diff(current);
@@ -382,7 +382,7 @@ public class SharePointRepository implements Repository {
           "Unexpected number of Change ObjectIds %s for SiteCollectionOnlyMode",
           notModified);
       // No Changes since last checkpoint.
-      return new CheckpointClosableIterableImpl.Builder(Collections.emptyList())
+      return new CheckpointCloseableIterableImpl.Builder(Collections.emptyList())
           .setCheckpoint(previous.encodePayload())
           .setHasMoreItems(false)
           .build();
@@ -407,7 +407,7 @@ public class SharePointRepository implements Repository {
           new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
               .addChangeToken(siteCollectionGuid, changeToken)
               .build();
-      return new CheckpointClosableIterableImpl.Builder(
+      return new CheckpointCloseableIterableImpl.Builder(
               Collections.singleton(modifiedItems.build()))
           .setCheckpoint(updatedCheckpoint.encodePayload())
           .setHasMoreItems(false)
@@ -440,7 +440,7 @@ public class SharePointRepository implements Repository {
         new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
             .addChangeToken(siteCollectionGuid, changeToken)
             .build();
-    return new CheckpointClosableIterableImpl.Builder(Collections.singleton(modifiedItems.build()))
+    return new CheckpointCloseableIterableImpl.Builder(Collections.singleton(modifiedItems.build()))
         .setCheckpoint(updatedCheckpoint.encodePayload())
         .setHasMoreItems(false)
         .build();
@@ -594,7 +594,7 @@ public class SharePointRepository implements Repository {
     return !"Unchanged".equals(change) && !"Delete".equals(change);
   }
 
-  private CheckpointClosableIterable getChangesVirtualServerMode(
+  private CheckpointCloseableIterable getChangesVirtualServerMode(
       SharePointIncrementalCheckpoint previous, SharePointIncrementalCheckpoint current)
       throws IOException {
     SharePointIncrementalCheckpoint.Builder newCheckpoint =
@@ -634,7 +634,7 @@ public class SharePointRepository implements Repository {
           getModifiedDocIdsContentDb(vsSiteConnector, contentDbId, changeToken, modifiedItems));
     }
 
-    return new CheckpointClosableIterableImpl.Builder(Collections.singleton(modifiedItems.build()))
+    return new CheckpointCloseableIterableImpl.Builder(Collections.singleton(modifiedItems.build()))
         .setCheckpoint(newCheckpoint.build().encodePayload())
         .setHasMoreItems(false)
         .build();
@@ -687,7 +687,7 @@ public class SharePointRepository implements Repository {
   }
 
   @Override
-  public CheckpointClosableIterable getAllDocs(byte[] checkpoint) {
+  public CheckpointCloseableIterable getAllDocs(byte[] checkpoint) {
     return null;
   }
 
@@ -1126,7 +1126,7 @@ public class SharePointRepository implements Repository {
     Holder<String> itemId = new Holder<String>();
     boolean result =
         scConnector.getSiteDataClient().getUrlSegments(polledItem.getName(), listId, itemId);
-    if (!result || itemId.value == null || listId.value == null) {
+    if (!result || (itemId.value == null) || (listId.value == null)) {
       log.log(
           Level.WARNING,
           "Unable to identify itemId for Item {0}. Deleting item",
@@ -1282,7 +1282,7 @@ public class SharePointRepository implements Repository {
     }
     String contentTypeId = row.getAttribute(OWS_CONTENTTYPEID_ATTRIBUTE);
     boolean isDocument =
-        contentTypeId != null && contentTypeId.startsWith(CONTENTTYPEID_DOCUMENT_PREFIX);
+        (contentTypeId != null) && contentTypeId.startsWith(CONTENTTYPEID_DOCUMENT_PREFIX);
     RepositoryDoc.Builder docBuilder = new RepositoryDoc.Builder();
     if (isDocument) {
       docBuilder.setContent(
@@ -1325,7 +1325,7 @@ public class SharePointRepository implements Repository {
     Holder<String> itemId = new Holder<String>();
     boolean result =
         scConnector.getSiteDataClient().getUrlSegments(itemObject.getItemId(), listId, itemId);
-    if (!result || itemId.value == null || listId.value == null) {
+    if (!result || (itemId.value == null) || (listId.value == null)) {
       log.log(
           Level.WARNING,
           "Unable to identify itemId for Item {0}. Deleting item",
@@ -1458,7 +1458,7 @@ public class SharePointRepository implements Repository {
     Map<String, PushItem> entries = new HashMap<>();
     String strAttachments = row.getAttribute(OWS_ATTACHMENTS_ATTRIBUTE);
     int attachments =
-        (strAttachments == null || "".equals(strAttachments))
+        ((strAttachments == null) || "".equals(strAttachments))
             ? 0
             : Integer.parseInt(strAttachments);
     if (attachments > 0) {
@@ -1519,7 +1519,7 @@ public class SharePointRepository implements Repository {
       }
     }
     String lastModifiedString = fi.getFirstHeaderWithName("Last-Modified");
-    if (lastModifiedString != null && setLastModified) {
+    if ((lastModifiedString != null) && setLastModified) {
       try {
         item.setLastModified(
             withValue(new DateTime(dateFormatRfc1123.get().parse(lastModifiedString))));
@@ -1654,11 +1654,11 @@ public class SharePointRepository implements Repository {
       if (this == o) {
         return true;
       }
-      if (o == null || getClass() != o.getClass()) {
+      if ((o == null) || (getClass() != o.getClass())) {
         return false;
       }
       SharePointConfiguration that = (SharePointConfiguration) o;
-      return siteCollectionOnly == that.siteCollectionOnly &&
+      return (siteCollectionOnly == that.siteCollectionOnly) &&
           Objects.equals(sharePointUrl, that.sharePointUrl) &&
           Objects.equals(virtualServerUrl, that.virtualServerUrl) &&
           Objects.equals(siteCollectionsToInclude, that.siteCollectionsToInclude);
@@ -1691,9 +1691,9 @@ public class SharePointRepository implements Repository {
       }
 
       SharePointConfiguration build() throws URISyntaxException {
-        if (sharePointUrl == null
-            || sharePointSiteCollectionOnly == null
-            || siteCollectionsToInclude == null) {
+        if ((sharePointUrl == null)
+            || (sharePointSiteCollectionOnly == null)
+            || (siteCollectionsToInclude == null)) {
           throw new InvalidConfigurationException();
         }
         sharePointSiteCollectionOnly = sharePointSiteCollectionOnly.trim();

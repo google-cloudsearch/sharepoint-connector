@@ -106,7 +106,8 @@ public class SiteDataClient {
       DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
       dbf.setNamespaceAware(true);
       Document doc =
-          dbf.newDocumentBuilder().parse(SiteDataSoap.class.getResourceAsStream("/SiteData.wsdl"));
+          dbf.newDocumentBuilder()
+              .parse(SiteDataClient.class.getResourceAsStream("wsdl/SiteData.wsdl"));
       String schemaNs = XMLConstants.W3C_XML_SCHEMA_NS_URI;
       Node schemaNode = doc.getElementsByTagNameNS(schemaNs, "schema").item(0);
       schema = SchemaFactory.newInstance(schemaNs).newSchema(
@@ -432,7 +433,7 @@ public class SiteDataClient {
 
   public static Service createSiteDataService() {
     return Service.create(
-        SiteDataSoap.class.getResource("/SiteData.wsdl"), new QName(XMLNS, "SiteData"));
+        SiteDataClient.class.getResource("wsdl/SiteData.wsdl"), new QName(XMLNS, "SiteData"));
   }
 
   /**
