@@ -18,6 +18,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
+import com.google.common.io.ByteStreams;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -149,9 +150,8 @@ class SamlAuthenticationHandler extends FormsAuthenticationHandler {
       }
     }
 
-    private String readInputStreamToString(InputStream in, Charset charset) {
-      // TODO(tvartak): Auto-generated method stub
-      return null;
+    private String readInputStreamToString(InputStream in, Charset charset) throws IOException {
+      return new String(ByteStreams.toByteArray(in), charset);
     }
   }
 
@@ -179,10 +179,10 @@ class SamlAuthenticationHandler extends FormsAuthenticationHandler {
     }
 
     public String getPostResponseHeaderField(String header) {
-      if (headers == null || !headers.containsKey(header)) {
+      if ((headers == null) || !headers.containsKey(header)) {
         return null;
       }
-      if (headers.get(header) == null || headers.get(header).isEmpty()) {
+      if ((headers.get(header) == null) || headers.get(header).isEmpty()) {
         return null;
       }
       StringBuilder sbValues = new StringBuilder();

@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.ChangeObjectType;
 import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.DiffKind;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.CursorPaginator;
@@ -80,6 +81,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -241,16 +245,15 @@ public class SharePointRepository implements Repository {
           .put(".msg", "application/vnd.ms-outlook")
           .build();
 
+  private final HttpClientImpl.Builder httpClientBuilder;
+  private final SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
+  private final ScheduledExecutorService scheduledExecutorService;
+
   private SiteConnectorFactory siteConnectorFactory;
   private SharePointConfiguration sharepointConfiguration;
   private NtlmAuthenticator ntlmAuthenticator;
-  // TODO(tvartak) : Add support for authentication handler implementations.
-  private FormsAuthenticationHandler authenticationHandler = null;
   private boolean performBrowserLeniency;
   private HttpClient httpClient;
-
-  private final HttpClientImpl.Builder httpClientBuilder;
-  private final SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
   private SharePointIncrementalCheckpoint initIncrementalCheckpoint;
   private ContentTemplate listItemContentTemplate;
 
@@ -264,6 +267,7 @@ public class SharePointRepository implements Repository {
       SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder) {
     this.httpClientBuilder = checkNotNull(httpClientBuilder);
     this.siteConnectorFactoryBuilder = checkNotNull(siteConnectorFactoryBuilder);
+    this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
   }
 
   @Override
@@ -297,12 +301,28 @@ public class SharePointRepository implements Repository {
         Configuration.getInteger("sharepoint.webservices.readTimeOutSecs", 180).get() * 1000;
 
     boolean xmlValidation = Configuration.getBoolean("sharepoint.xmlValidation", false).get();
-    SharePointRequestContext requestContext = new SharePointRequestContext.Builder()
-        .setAuthenticationHandler(authenticationHandler)
-        .setSocketTimeoutMillis(socketTimeoutMillis)
-        .setReadTimeoutMillis(readTimeOutMillis)
-        .setUserAgent(sharepointUserAgent)
-        .build();
+    AuthenticationClientFactory authenticationClientFactory = new AuthenticationClientFactoryImpl();
+    authenticationClientFactory.init(
+        sharePointServer, username, password, scheduledExecutorService);
+    FormsAuthenticationHandler formsAuthenticationHandler =
+        authenticationClientFactory.getFormsAuthenticationHandler();
+    if (formsAuthenticationHandler != null) {
+      try {
+        formsAuthenticationHandler.start();
+      } catch (IOException e) {
+        throw new RepositoryException.Builder()
+            .setCause(e)
+            .setErrorMessage("Error authenticating to SharePoint")
+            .build();
+      }
+    }
+    SharePointRequestContext requestContext =
+        new SharePointRequestContext.Builder()
+            .setAuthenticationHandler(formsAuthenticationHandler)
+            .setSocketTimeoutMillis(socketTimeoutMillis)
+            .setReadTimeoutMillis(readTimeOutMillis)
+            .setUserAgent(sharepointUserAgent)
+            .build();
     httpClient =
         httpClientBuilder
             .setSharePointRequestContext(requestContext)
@@ -768,6 +788,7 @@ public class SharePointRepository implements Repository {
 
   @Override
   public void close() {
+    MoreExecutors.shutdownAndAwaitTermination(scheduledExecutorService, 10, TimeUnit.SECONDS);
   }
 
   private SiteConnector getConnectorForDocId(String url) throws IOException, URISyntaxException {
