@@ -219,6 +219,7 @@
  ows_Created='2012-05-01T22:14:06Z'
  ows_Author='1073741823;#System Account'
  ows_Editor='1073741823;#System Account' ows_owshiddenversion='4'
+ ows_MultiValue=';#alpha;#beta;#'
  ows_WorkflowVersion='1' ows__UIVersion='512'
  ows__UIVersionString='1.0' ows_Attachments='1'
  ows__ModerationStatus='0' ows_LinkTitleNoMenu='Inside Folder'

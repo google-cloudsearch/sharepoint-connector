@@ -13,24 +13,27 @@ import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
 import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.ChangeObjectType;
 import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.DiffKind;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.CursorPaginator;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.Paginator;
+import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterable;
+import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterableImpl;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.RepositoryException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
+import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
-import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointCloseableIterable;
-import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointCloseableIterableImpl;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.Repository;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryContext;
@@ -79,9 +82,13 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.xml.namespace.QName;
 import javax.xml.ws.Holder;
+import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
@@ -137,6 +144,8 @@ public class SharePointRepository implements Repository {
   /** As described at http://msdn.microsoft.com/en-us/library/aa543822.aspx . */
   private static final String CONTENTTYPEID_DOCUMENT_PREFIX = "0x0101";
 
+  private static final Pattern METADATA_ESCAPE_PATTERN = Pattern.compile("_x([0-9a-f]{4})_");
+  private static final Pattern ALTERNATIVE_VALUE_PATTERN = Pattern.compile("^\\d+;#");
 
   static final String VIRTUAL_SERVER_ID = "ROOT_NEW";
   static final String SITE_COLLECTION_ADMIN_FRAGMENT = "admin";
@@ -243,6 +252,7 @@ public class SharePointRepository implements Repository {
   private final HttpClientImpl.Builder httpClientBuilder;
   private final SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
   private SharePointIncrementalCheckpoint initIncrementalCheckpoint;
+  private ContentTemplate listItemContentTemplate;
 
   SharePointRepository() {
     this(new HttpClientImpl.Builder(), new SiteConnectorFactoryImpl.Builder());
@@ -305,6 +315,7 @@ public class SharePointRepository implements Repository {
             .setXmlValidation(xmlValidation)
             .build();
     initIncrementalCheckpoint = computeIncrementalCheckpoint();
+    listItemContentTemplate = ContentTemplate.fromConfiguration("sharepointItem");
   }
 
   @Override
@@ -1247,6 +1258,7 @@ public class SharePointRepository implements Repository {
     if (serverUrl.contains("&") || serverUrl.contains("=") || serverUrl.contains("%")) {
       throw new AssertionError();
     }
+    Multimap<String, Object> extractedMetadataValues = extractMetadataValues(row);
     if (isFolder) {
       String root = scConnector.encodeDocId(l.getMetadata().getRootFolder());
       root += "/";
@@ -1278,7 +1290,12 @@ public class SharePointRepository implements Repository {
       addChildIdsToRepositoryDoc(
           doc,
           processFolder(scConnector, listId.value, folder.substring(root.length()), itemObject));
-      return doc.setItem(itemBuilder.build()).build();
+      return doc.setItem(itemBuilder.build())
+          .setContent(
+              ByteArrayContent.fromString(
+                  null, listItemContentTemplate.apply(extractedMetadataValues)),
+              ContentFormat.HTML)
+          .build();
     }
     String contentTypeId = row.getAttribute(OWS_CONTENTTYPEID_ATTRIBUTE);
     boolean isDocument =
@@ -1304,6 +1321,9 @@ public class SharePointRepository implements Repository {
       }
       addChildIdsToRepositoryDoc(
           docBuilder, processAttachments(scConnector, listId.value, itemId.value, row, itemObject));
+      docBuilder.setContent(
+          ByteArrayContent.fromString(null, listItemContentTemplate.apply(extractedMetadataValues)),
+          ContentFormat.HTML);
     }
     return docBuilder.setItem(itemBuilder.build()).build();
   }
@@ -1535,6 +1555,66 @@ public class SharePointRepository implements Repository {
       log.log(Level.WARNING, "Could not close content stream", e);
     }
     return content;
+  }
+
+  private static Multimap<String, Object> extractMetadataValues(Element ele) {
+    Multimap<String, Object> values = ArrayListMultimap.create();
+    NamedNodeMap map = ele.getAttributes();
+    for (int i = 0; i < map.getLength(); i++) {
+      Attr attribute = (Attr) map.item(i);
+      addMetadata(attribute.getName(), attribute.getValue(), values);
+    }
+    return values;
+  }
+
+  private static void addMetadata(String name, String value, Multimap<String, Object> values) {
+    if ("ows_MetaInfo".equals(name)) {
+      // ows_MetaInfo is parsed out into other fields for us by SharePoint.
+      // We filter it since it only duplicates those other fields.
+      return;
+    }
+    if (name.startsWith("ows_")) {
+      name = name.substring("ows_".length());
+    }
+    name = decodeMetadataName(name);
+    if (ALTERNATIVE_VALUE_PATTERN.matcher(value).find()) {
+      // This is a lookup field. We need to take alternative values only.
+      // Ignore the integer part. 314;#pi;#42;#the answer
+      String[] parts = value.split(";#", 0);
+      for (int i = 1; i < parts.length; i += 2) {
+        if (parts[i].isEmpty()) {
+          continue;
+        }
+        values.put(name, parts[i]);
+      }
+    } else if (value.startsWith(";#") && value.endsWith(";#")) {
+      // This is a multi-choice field. Values will be in the form:
+      // ;#value1;#value2;#
+      for (String part : value.split(";#", 0)) {
+        if (part.isEmpty()) {
+          continue;
+        }
+        values.put(name, part);
+      }
+    } else {
+      values.put(name, value);
+    }
+  }
+
+  /**
+   * SharePoint encodes special characters as _x????_ where the ? are hex digits. Each such encoding
+   * is a UTF-16 character. For example, _x0020_ is space and _xFFE5_ is the fullwidth yen sign.
+   */
+  @VisibleForTesting
+  static String decodeMetadataName(String name) {
+    Matcher m = METADATA_ESCAPE_PATTERN.matcher(name);
+    StringBuffer sb = new StringBuffer();
+    while (m.find()) {
+      char c = (char) Integer.parseInt(m.group(1), 16);
+      m.appendReplacement(sb, Matcher.quoteReplacement("" + c));
+    }
+    m.appendTail(sb);
+    return sb.toString();
   }
 
   private static boolean elementHasName(Element ele, QName name) {

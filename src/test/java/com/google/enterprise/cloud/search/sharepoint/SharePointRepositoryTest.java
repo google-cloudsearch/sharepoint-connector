@@ -1,6 +1,7 @@
 package com.google.enterprise.cloud.search.sharepoint;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -13,11 +14,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import com.google.api.client.http.ByteArrayContent;
 import com.google.api.client.util.DateTime;
 import com.google.api.services.cloudsearch.v1.model.Item;
 import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Multimap;
+import com.google.common.io.ByteStreams;
 import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.ChangeObjectType;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.CursorPaginator;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.Paginator;
@@ -27,8 +32,11 @@ import com.google.enterprise.cloudsearch.sdk.config.Configuration.ResetConfigRul
 import com.google.enterprise.cloudsearch.sdk.config.Configuration.SetupConfigRule;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
+import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
+import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate.UnmappedColumnsMode;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
+import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointCloseableIterable;
@@ -47,6 +55,7 @@ import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -613,8 +622,34 @@ public class SharePointRepositoryTest {
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")));
 
     RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
+    ContentTemplate listItemContentTemplate =
+        new ContentTemplate.Builder()
+            .setTitle("Title")
+            .setLowContent(Arrays.asList("Modified", "Created", "Author", "Editor", "ContentType"))
+            .setUnmappedColumnMode(UnmappedColumnsMode.APPEND)
+            .build();
+    Multimap<String, Object> values = ArrayListMultimap.create();
+    values.put("Title", "Inside Folder");
+    values.put("ContentType", "Item");
+    values.put("Modified", "2012-05-04T21:24:32Z");
+    values.put("Created", "2012-05-01T22:14:06Z");
+    values.put("Author", "System Account");
+    values.put("Editor", "System Account");
+    values.putAll("MultiValue", Arrays.asList("alpha", "beta"));
+    String expectedContent = listItemContentTemplate.apply(values);
+    expectedDoc.setContent(
+        ByteArrayContent.fromString(null, expectedContent),
+        ContentFormat.HTML);
+    RepositoryDoc expected = expectedDoc.build();
     ApiOperation actual = repo.getDoc(entry);
-    assertEquals(expectedDoc.build(), actual);
+    RepositoryDoc returnedDoc = (RepositoryDoc) actual;
+    try (InputStream inputStream = returnedDoc.getContent().getInputStream()) {
+      String actualContent = new String(ByteStreams.toByteArray(inputStream), UTF_8);
+      assertEquals(expectedContent, actualContent);
+    }
+    assertEquals(expected.getItem(), returnedDoc.getItem());
+    assertEquals(expected.getContentFormat(), returnedDoc.getContentFormat());
+    assertEquals(expected.getIndexItemMode(), returnedDoc.getIndexItemMode());
   }
 
   @Test
@@ -1141,6 +1176,11 @@ public class SharePointRepositoryTest {
     properties.put("sharepoint.server", "http://localhost:1");
     properties.put("sharepoint.username", "user");
     properties.put("sharepoint.password", "password");
+    properties.put("contentTemplate.sharepointItem.title", "Title");
+    properties.put(
+        "contentTemplate.sharepointItem.quality.low",
+        "Modified,Created,Author,Editor,ContentType,MultiValue");
+    properties.put("contentTemplate.sharepointItem.unmappedColumnsMode", "IGNORE");
     return properties;
   }
 
