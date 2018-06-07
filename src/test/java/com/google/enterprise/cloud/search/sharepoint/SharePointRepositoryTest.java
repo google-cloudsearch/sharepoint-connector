@@ -36,6 +36,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate.UnmappedColumnsMode;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
+import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
@@ -289,7 +290,11 @@ public class SharePointRepositoryTest {
             .setName(SharePointRepository.VIRTUAL_SERVER_ID)
             .encodePayload(rootServerPayload.encodePayload());
     Item rootItem =
-        new IndexingItemBuilder(SharePointRepository.VIRTUAL_SERVER_ID).setAcl(policyAcl).build();
+        new IndexingItemBuilder(SharePointRepository.VIRTUAL_SERVER_ID)
+            .setAcl(policyAcl)
+            .setItemType(ItemType.CONTAINER_ITEM)
+            .setPayload(rootServerPayload.encodePayload())
+            .build();
     SharePointObject siteCollectionPayload =
         new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
             .setUrl("http://localhost:1")
@@ -384,10 +389,11 @@ public class SharePointRepositoryTest {
         new RepositoryDoc.Builder()
             .setItem(
                 getWebItem(
-                    "http://localhost:1",
-                    SharePointRepository.VIRTUAL_SERVER_ID,
-                    siteAdminFragmentId,
-                    false));
+                        "http://localhost:1",
+                        SharePointRepository.VIRTUAL_SERVER_ID,
+                        siteAdminFragmentId,
+                        false)
+                    .encodePayload(siteCollectionPayload.encodePayload()));
     childEntries.entrySet().stream().forEach(e -> expectedDoc.addChildId(e.getKey(), e.getValue()));
     operations.add(expectedDoc.build());
     ApiOperation expected = ApiOperations.batch(operations.iterator());
@@ -444,10 +450,11 @@ public class SharePointRepositoryTest {
         new RepositoryDoc.Builder()
             .setItem(
                 getWebItem(
-                    "http://localhost:1/subsite",
-                    "http://localhost:1",
-                    "http://localhost:1",
-                    true));
+                        "http://localhost:1/subsite",
+                        "http://localhost:1",
+                        "http://localhost:1",
+                        true)
+                    .encodePayload(webPayload.encodePayload()));
     childEntries.entrySet().stream().forEach(e -> expectedDoc.addChildId(e.getKey(), e.getValue()));
     ApiOperation actual = repo.getDoc(entry);
     assertEquals(expectedDoc.build(), actual);
@@ -539,7 +546,9 @@ public class SharePointRepositoryTest {
                     .build())
             .setUrl(FieldOrValue.withValue("http://localhost:1/Lists/Custom List/AllItems.aspx"))
             .setContainer("http://localhost:1/Lists/Custom List")
-            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")));
+            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setItemType(ItemType.CONTAINER_ITEM)
+            .setPayload(listPayload.encodePayload());
 
     RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
     getChildEntriesForList("http://localhost:1/Lists/Custom List")
@@ -619,7 +628,9 @@ public class SharePointRepositoryTest {
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
             .setContainer("http://localhost:1/Lists/Custom List")
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")));
+            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setPayload(payloadItem.encodePayload())
+            .setItemType(ItemType.CONTAINER_ITEM);
 
     RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
     ContentTemplate listItemContentTemplate =
@@ -1313,7 +1324,11 @@ public class SharePointRepositoryTest {
   }
 
   private Item getWebItem(String url, String parent, String aclParent, boolean inherit) {
-    Item item = new Item().setName(url).setMetadata(new ItemMetadata().setContainerName(parent));
+    Item item =
+        new Item()
+            .setName(url)
+            .setMetadata(new ItemMetadata().setContainerName(parent))
+            .setItemType(ItemType.CONTAINER_ITEM.name());
     if (inherit) {
       new Acl.Builder()
           .setInheritanceType(InheritanceType.PARENT_OVERRIDE)

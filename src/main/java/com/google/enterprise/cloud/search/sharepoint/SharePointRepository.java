@@ -32,6 +32,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
+import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
@@ -744,7 +745,7 @@ public class SharePointRepository implements Repository {
       }
 
       if (SharePointObject.VIRTUAL_SERVER.equals(objectType)) {
-        return getVirtualServerDocContent();
+        return getVirtualServerDocContent(item);
       }
 
       SiteConnector siteConnector;
@@ -961,7 +962,7 @@ public class SharePointRepository implements Repository {
         sharepointConfiguration.getSharePointUrl().getUrl());
   }
 
-  private ApiOperation getVirtualServerDocContent() throws RepositoryException {
+  private ApiOperation getVirtualServerDocContent(Item item) throws RepositoryException {
     try {
       SiteConnector vsConnector =
           getSiteConnector(
@@ -971,7 +972,9 @@ public class SharePointRepository implements Repository {
 
       IndexingItemBuilder itemBuilder =
           new IndexingItemBuilder(VIRTUAL_SERVER_ID)
-              .setAcl(vsConnector.getWebApplicationPolicyAcl(vs));
+              .setAcl(vsConnector.getWebApplicationPolicyAcl(vs))
+              .setItemType(ItemType.CONTAINER_ITEM)
+              .setPayload(item.decodePayload());
       RepositoryDoc.Builder docBuilder = new RepositoryDoc.Builder().setItem(itemBuilder.build());
       for (ContentDatabases.ContentDatabase cdcd : vs.getContentDatabases().getContentDatabase()) {
         try {
@@ -1048,6 +1051,8 @@ public class SharePointRepository implements Repository {
             .setInheritFrom(siteAdminFragmentId)
             .build();
     item.setAcl(itemAcl);
+    item.setItemType(ItemType.CONTAINER_ITEM);
+    item.setPayload(polledItem.decodePayload());
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder().setItem(item.build());
     addChildIdsToRepositoryDoc(
         doc, getChildWebEntries(scConnector, site.getMetadata().getID(), rootWeb));
@@ -1065,8 +1070,7 @@ public class SharePointRepository implements Repository {
     Web parentWeb = parentSiteConnector.getSiteDataClient().getContentWeb();
     boolean inheritPermissions =
         Objects.equals(currentWeb.getMetadata().getScopeID(), parentWeb.getMetadata().getScopeID());
-    IndexingItemBuilder item =
-        new IndexingItemBuilder(polledItem.getName()).setContainer(parentWebUrl);
+
     Acl.Builder aclBuilder = new Acl.Builder().setInheritanceType(InheritanceType.PARENT_OVERRIDE);
     if (inheritPermissions) {
       aclBuilder.setInheritFrom(parentWebUrl);
@@ -1074,7 +1078,12 @@ public class SharePointRepository implements Repository {
       aclBuilder.setReaders(scConnector.getWebAcls(currentWeb));
       aclBuilder.setInheritFrom(scConnector.getSiteUrl(), SITE_COLLECTION_ADMIN_FRAGMENT);
     }
-    item.setAcl(aclBuilder.build());
+    IndexingItemBuilder item =
+        new IndexingItemBuilder(polledItem.getName())
+            .setAcl(aclBuilder.build())
+            .setContainer(parentWebUrl)
+            .setPayload(polledItem.decodePayload())
+            .setItemType(ItemType.CONTAINER_ITEM);
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder();
     addChildIdsToRepositoryDoc(
         doc, getChildWebEntries(scConnector, webObject.getSiteId(), currentWeb));
@@ -1105,6 +1114,7 @@ public class SharePointRepository implements Repository {
         new Item()
             .setName(rootFolderDocId)
             .setMetadata(new ItemMetadata().setContainerName(scConnector.getWebUrl()))
+            .setItemType(ItemType.CONTAINER_ITEM.name())
             .encodePayload(rootFolderPayload.encodePayload());
 
     Web w = scConnector.getSiteDataClient().getContentWeb();
@@ -1125,7 +1135,11 @@ public class SharePointRepository implements Repository {
             .build();
     ItemMetadata metadata = new ItemMetadata();
     metadata.setContainerName(rootFolderDocId);
-    Item listItem = new Item().setName(polledItem.getName());
+    Item listItem =
+        new Item()
+            .setName(polledItem.getName())
+            .encodePayload(polledItem.decodePayload())
+            .setItemType(ItemType.CONTAINER_ITEM.name());
     new Acl.Builder()
         .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
         .setInheritFrom(rootFolderDocId)
@@ -1165,7 +1179,8 @@ public class SharePointRepository implements Repository {
           polledItem.getName());
       return ApiOperations.deleteItem(polledItem.getName());
     }
-    IndexingItemBuilder itemBuilder = new IndexingItemBuilder(polledItem.getName());
+    IndexingItemBuilder itemBuilder =
+        new IndexingItemBuilder(polledItem.getName()).setPayload(polledItem.decodePayload());
     ItemData i = scConnector.getSiteDataClient().getContentItem(listId.value, itemId.value);
 
     Xml xml = i.getXml();
@@ -1281,6 +1296,7 @@ public class SharePointRepository implements Repository {
     }
     Multimap<String, Object> extractedMetadataValues = extractMetadataValues(row);
     if (isFolder) {
+      itemBuilder.setItemType(ItemType.CONTAINER_ITEM);
       String root = scConnector.encodeDocId(l.getMetadata().getRootFolder());
       root += "/";
       String folder = scConnector.encodeDocId(serverUrl);
@@ -1323,9 +1339,12 @@ public class SharePointRepository implements Repository {
         (contentTypeId != null) && contentTypeId.startsWith(CONTENTTYPEID_DOCUMENT_PREFIX);
     RepositoryDoc.Builder docBuilder = new RepositoryDoc.Builder();
     if (isDocument) {
+      itemBuilder.setItemType(ItemType.CONTENT_ITEM);
       docBuilder.setContent(
           getFileContent(polledItem.getName(), itemBuilder, true), ContentFormat.RAW);
     } else {
+      // Since list items can have attachments as child items, marking list items as containers
+      itemBuilder.setItemType(ItemType.CONTAINER_ITEM);
       String defaultViewItemUrl = scConnector.encodeDocId(l.getMetadata().getDefaultViewItemUrl());
       try {
         URI displayPage = buildSharePointUrl(defaultViewItemUrl).getURI();
@@ -1406,7 +1425,10 @@ public class SharePointRepository implements Repository {
             .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
             .setInheritFrom(itemObject.getItemId())
             .build();
-    itemBuilder.setAcl(acl);
+    itemBuilder
+        .setAcl(acl)
+        .setPayload(polledItem.decodePayload())
+        .setItemType(ItemType.CONTENT_ITEM);
     return new RepositoryDoc.Builder()
         .setItem(itemBuilder.build())
         .setContent(content, ContentFormat.RAW)
