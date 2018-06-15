@@ -340,18 +340,20 @@ public class SharePointRepository implements Repository {
   }
 
   @Override
-  public CheckpointCloseableIterable getIds(byte[] checkpoint) throws RepositoryException {
+  public CheckpointCloseableIterable<ApiOperation> getIds(byte[] checkpoint)
+      throws RepositoryException {
     log.entering("SharePointConnector", "traverse");
     Collection<ApiOperation> toReturn =
         sharepointConfiguration.isSiteCollectionUrl()
             ? getDocIdsSiteCollectionOnly()
             : getDocIdsVirtualServer();
     log.exiting("SharePointConnector", "traverse");
-    return new CheckpointCloseableIterableImpl.Builder(toReturn).build();
+    return new CheckpointCloseableIterableImpl.Builder<>(toReturn).build();
   }
 
   @Override
-  public CheckpointCloseableIterable getChanges(byte[] checkpoint) throws RepositoryException {
+  public CheckpointCloseableIterable<ApiOperation> getChanges(byte[] checkpoint)
+      throws RepositoryException {
     SharePointIncrementalCheckpoint previousCheckpoint;
     try {
       Optional<SharePointIncrementalCheckpoint> parsedCheckpoint =
@@ -403,7 +405,7 @@ public class SharePointRepository implements Repository {
     }
   }
 
-  private CheckpointCloseableIterable getChangesSiteCollectionOnlyMode(
+  private CheckpointCloseableIterable<ApiOperation> getChangesSiteCollectionOnlyMode(
       SharePointIncrementalCheckpoint previous, SharePointIncrementalCheckpoint current)
       throws IOException {
     Map<DiffKind, Set<String>> diff = previous.diff(current);
@@ -414,9 +416,9 @@ public class SharePointRepository implements Repository {
           "Unexpected number of Change ObjectIds %s for SiteCollectionOnlyMode",
           notModified);
       // No Changes since last checkpoint.
-      return new CheckpointCloseableIterableImpl.Builder(Collections.emptyList())
+      return new CheckpointCloseableIterableImpl.Builder<ApiOperation>(Collections.emptyList())
           .setCheckpoint(previous.encodePayload())
-          .setHasMoreItems(false)
+          .setHasMore(false)
           .build();
     }
 
@@ -439,10 +441,10 @@ public class SharePointRepository implements Repository {
           new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
               .addChangeToken(siteCollectionGuid, changeToken)
               .build();
-      return new CheckpointCloseableIterableImpl.Builder(
+      return new CheckpointCloseableIterableImpl.Builder<ApiOperation>(
               Collections.singleton(modifiedItems.build()))
           .setCheckpoint(updatedCheckpoint.encodePayload())
-          .setHasMoreItems(false)
+          .setHasMore(false)
           .build();
     }
 
@@ -472,9 +474,10 @@ public class SharePointRepository implements Repository {
         new SharePointIncrementalCheckpoint.Builder(ChangeObjectType.SITE_COLLECTION)
             .addChangeToken(siteCollectionGuid, changeToken)
             .build();
-    return new CheckpointCloseableIterableImpl.Builder(Collections.singleton(modifiedItems.build()))
+    return new CheckpointCloseableIterableImpl.Builder<ApiOperation>(
+            Collections.singleton(modifiedItems.build()))
         .setCheckpoint(updatedCheckpoint.encodePayload())
-        .setHasMoreItems(false)
+        .setHasMore(false)
         .build();
   }
 
@@ -626,7 +629,7 @@ public class SharePointRepository implements Repository {
     return !"Unchanged".equals(change) && !"Delete".equals(change);
   }
 
-  private CheckpointCloseableIterable getChangesVirtualServerMode(
+  private CheckpointCloseableIterable<ApiOperation> getChangesVirtualServerMode(
       SharePointIncrementalCheckpoint previous, SharePointIncrementalCheckpoint current)
       throws IOException {
     SharePointIncrementalCheckpoint.Builder newCheckpoint =
@@ -666,9 +669,10 @@ public class SharePointRepository implements Repository {
           getModifiedDocIdsContentDb(vsSiteConnector, contentDbId, changeToken, modifiedItems));
     }
 
-    return new CheckpointCloseableIterableImpl.Builder(Collections.singleton(modifiedItems.build()))
+    return new CheckpointCloseableIterableImpl.Builder<ApiOperation>(
+            Collections.singleton(modifiedItems.build()))
         .setCheckpoint(newCheckpoint.build().encodePayload())
-        .setHasMoreItems(false)
+        .setHasMore(false)
         .build();
   }
 
@@ -719,7 +723,7 @@ public class SharePointRepository implements Repository {
   }
 
   @Override
-  public CheckpointCloseableIterable getAllDocs(byte[] checkpoint) {
+  public CheckpointCloseableIterable<ApiOperation> getAllDocs(byte[] checkpoint) {
     return null;
   }
 

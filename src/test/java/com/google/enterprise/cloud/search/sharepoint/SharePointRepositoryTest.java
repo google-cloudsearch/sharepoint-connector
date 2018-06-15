@@ -26,6 +26,9 @@ import com.google.common.io.ByteStreams;
 import com.google.enterprise.cloud.search.sharepoint.SharePointIncrementalCheckpoint.ChangeObjectType;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.CursorPaginator;
 import com.google.enterprise.cloud.search.sharepoint.SiteDataClient.Paginator;
+import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterable;
+import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterableImpl;
+import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterableImpl.CompareCheckpointCloseableIterableRule;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.RepositoryException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration.ResetConfigRule;
@@ -40,9 +43,6 @@ import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemTy
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
-import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointCloseableIterable;
-import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointCloseableIterableImpl;
-import com.google.enterprise.cloudsearch.sdk.indexing.template.CheckpointCloseableIterableImpl.CompareCheckpointCloseableIterableRule;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryDoc;
@@ -86,7 +86,7 @@ public class SharePointRepositoryTest {
   @Rule public SetupConfigRule setupConfig = SetupConfigRule.uninitialized();
 
   @Rule
-  public CompareCheckpointCloseableIterableRule checkpointIterableRule =
+  public CompareCheckpointCloseableIterableRule<ApiOperation> checkpointIterableRule =
       CompareCheckpointCloseableIterableRule.getCompareRule();
 
   @Mock HttpClientImpl.Builder httpClientBuilder;
@@ -690,13 +690,13 @@ public class SharePointRepositoryTest {
                 "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
                 "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(Collections.emptyList())
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<ApiOperation>(Collections.emptyList())
             .setCheckpoint(checkpoint.encodePayload())
-            .setHasMoreItems(false)
+            .setHasMore(false)
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(null);
+    CheckpointCloseableIterable<ApiOperation> changes = repo.getChanges(null);
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -727,12 +727,12 @@ public class SharePointRepositoryTest {
                 "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
                 "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(Collections.emptyList())
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<ApiOperation>(Collections.emptyList())
             .setCheckpoint(checkpoint.encodePayload())
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(checkpoint.encodePayload());
+    CheckpointCloseableIterable<ApiOperation> changes = repo.getChanges(checkpoint.encodePayload());
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -763,13 +763,13 @@ public class SharePointRepositoryTest {
                 "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
                 "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(Collections.emptyList())
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<ApiOperation>(Collections.emptyList())
             .setCheckpoint(checkpoint.encodePayload())
-            .setHasMoreItems(false)
+            .setHasMore(false)
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges("invalid".getBytes());
+    CheckpointCloseableIterable<ApiOperation> changes = repo.getChanges("invalid".getBytes());
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -806,12 +806,13 @@ public class SharePointRepositoryTest {
                 "{bb3bb2dd-6ea7-471b-a361-6fb67988755c}",
                 "1;1;bb3bb2dd-6ea7-471b-a361-6fb67988755c;634762601982930000;726")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(Collections.emptyList())
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<ApiOperation>(Collections.emptyList())
             .setCheckpoint(checkpoint.encodePayload())
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    CheckpointCloseableIterable<ApiOperation> changes =
+        repo.getChanges(checkpointOld.encodePayload());
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -869,8 +870,8 @@ public class SharePointRepositoryTest {
             .setUrl("http://localhost:1/Lists/Announcements/2_.000")
             .setObjectId("item")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<>(
                 Collections.<ApiOperation>singleton(
                     new PushItems.Builder()
                         .addPushItem(
@@ -882,7 +883,8 @@ public class SharePointRepositoryTest {
             .setCheckpoint(checkpoint.encodePayload())
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    CheckpointCloseableIterable<ApiOperation> changes =
+        repo.getChanges(checkpointOld.encodePayload());
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -939,8 +941,8 @@ public class SharePointRepositoryTest {
             .setUrl("http://localhost:1/Lists/Announcements/2_.000")
             .setObjectId("item")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<>(
                 Collections.<ApiOperation>singleton(
                     new PushItems.Builder()
                         .addPushItem(
@@ -952,7 +954,8 @@ public class SharePointRepositoryTest {
             .setCheckpoint(checkpoint.encodePayload())
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    CheckpointCloseableIterable<ApiOperation> changes =
+        repo.getChanges(checkpointOld.encodePayload());
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -978,13 +981,13 @@ public class SharePointRepositoryTest {
                 "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
                 "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<ApiOperation>(
                 Collections.singleton(new PushItems.Builder().build()))
             .setCheckpoint(checkpoint.encodePayload())
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(null);
+    CheckpointCloseableIterable<ApiOperation> changes = repo.getChanges(null);
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -1010,14 +1013,14 @@ public class SharePointRepositoryTest {
                 "{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}",
                 "1;0;4fb7dea1-2912-4927-9eda-1ea2f0977cf8;634727056594000000;603")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<>(
                 Collections.<ApiOperation>singleton(new PushItems.Builder().build()))
             .setCheckpoint(checkpoint.encodePayload())
-            .setHasMoreItems(false)
+            .setHasMore(false)
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(checkpoint.encodePayload());
+    CheckpointCloseableIterable<ApiOperation> changes = repo.getChanges(checkpoint.encodePayload());
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -1072,8 +1075,8 @@ public class SharePointRepositoryTest {
             .setUrl("http://localhost:1/Lists/Announcements/2_.000")
             .setObjectId("item")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<>(
                 Collections.<ApiOperation>singleton(
                     new PushItems.Builder()
                         .addPushItem(
@@ -1085,7 +1088,8 @@ public class SharePointRepositoryTest {
             .setCheckpoint(checkpoint.encodePayload())
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    CheckpointCloseableIterable<ApiOperation> changes =
+        repo.getChanges(checkpointOld.encodePayload());
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
@@ -1143,8 +1147,8 @@ public class SharePointRepositoryTest {
             .setUrl("http://localhost:1/Lists/Announcements/2_.000")
             .setObjectId("item")
             .build();
-    CheckpointCloseableIterableImpl expected =
-        new CheckpointCloseableIterableImpl.Builder(
+    CheckpointCloseableIterable<ApiOperation> expected =
+        new CheckpointCloseableIterableImpl.Builder<>(
                 Collections.<ApiOperation>singleton(
                     new PushItems.Builder()
                         .addPushItem(
@@ -1156,7 +1160,8 @@ public class SharePointRepositoryTest {
             .setCheckpoint(checkpoint.encodePayload())
             .build();
 
-    CheckpointCloseableIterable changes = repo.getChanges(checkpointOld.encodePayload());
+    CheckpointCloseableIterable<ApiOperation> changes =
+        repo.getChanges(checkpointOld.encodePayload());
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
