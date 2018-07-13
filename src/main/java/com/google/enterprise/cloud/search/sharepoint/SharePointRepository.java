@@ -62,7 +62,6 @@ import com.microsoft.schemas.sharepoint.soap.Xml;
 import java.io.IOException;
 import java.net.Authenticator;
 import java.net.MalformedURLException;
-import java.net.PasswordAuthentication;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -74,7 +73,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -154,11 +152,6 @@ public class SharePointRepository implements Repository {
 
   static final String VIRTUAL_SERVER_ID = "ROOT_NEW";
   static final String SITE_COLLECTION_ADMIN_FRAGMENT = "admin";
-
-  private static final String DEFAULT_USER_NAME =
-      System.getProperty("os.name").contains("Windows") ? "" : null;
-  private static final String DEFAULT_PASSWORD =
-      System.getProperty("os.name").contains("Windows") ? "" : null;
 
   private static final TimeZone gmt = TimeZone.getTimeZone("GMT");
   /** RFC 822 date format, as updated by RFC 1123. */
@@ -253,7 +246,6 @@ public class SharePointRepository implements Repository {
   private SiteConnectorFactory siteConnectorFactory;
   private SharePointConfiguration sharepointConfiguration;
   private NtlmAuthenticator ntlmAuthenticator;
-  private boolean performBrowserLeniency;
   private HttpClient httpClient;
   private SharePointIncrementalCheckpoint initIncrementalCheckpoint;
   private ContentTemplate listItemContentTemplate;
@@ -274,37 +266,24 @@ public class SharePointRepository implements Repository {
   @Override
   public void init(RepositoryContext repositoryContext) throws RepositoryException {
     checkState(Configuration.isInitialized(), "config should be initailized");
-    String sharePointServer = Configuration.getString("sharepoint.server", null).get();
-    performBrowserLeniency =
-        Configuration.getBoolean("connector.lenientUrlRulesAndCustomRedirect", true).get();
-    String username = Configuration.getString("sharepoint.username", DEFAULT_USER_NAME).get();
-    String password = Configuration.getString("sharepoint.password", DEFAULT_PASSWORD).get();
+    sharepointConfiguration = SharePointConfiguration.fromConfiguration();
+    String username = sharepointConfiguration.getUserName();
+    String password = sharepointConfiguration.getPassword();
     ntlmAuthenticator = new NtlmAuthenticator(username, password);
+    SharePointUrl sharePointUrl = sharepointConfiguration.getSharePointUrl();
     try {
-      SharePointUrl configuredUrl = buildSharePointUrl(sharePointServer);
-      sharepointConfiguration =
-          new SharePointConfiguration.Builder(configuredUrl)
-              .setSharePointSiteCollectionOnly(
-                  Configuration.getString("sharepoint.siteCollectionOnly", "").get())
-              .build();
-      ntlmAuthenticator.addPermitForHost(configuredUrl.toURL());
-    } catch (Exception e) {
-      throw new InvalidConfigurationException("Error validating SharePoint URL", e);
+      ntlmAuthenticator.addPermitForHost(sharePointUrl.toURL());
+    } catch (MalformedURLException malformed) {
+      throw new InvalidConfigurationException(
+          "Unable to parse SharePoint URL " + sharePointUrl, malformed);
     }
     if (!"".equals(username) && !"".equals(password)) {
       // Unfortunately, this is a JVM-wide modification.
       Authenticator.setDefault(ntlmAuthenticator);
     }
-    String sharepointUserAgent = Configuration.getString("sharepoint.userAgent", "").get().trim();
-    int socketTimeoutMillis =
-        Configuration.getInteger("sharepoint.webservices.socketTimeoutSecs", 30).get() * 1000;
-    int readTimeOutMillis =
-        Configuration.getInteger("sharepoint.webservices.readTimeOutSecs", 180).get() * 1000;
-
-    boolean xmlValidation = Configuration.getBoolean("sharepoint.xmlValidation", false).get();
     AuthenticationClientFactory authenticationClientFactory = new AuthenticationClientFactoryImpl();
     authenticationClientFactory.init(
-        sharePointServer, username, password, scheduledExecutorService);
+        sharePointUrl.getUrl(), username, password, scheduledExecutorService);
     FormsAuthenticationHandler formsAuthenticationHandler =
         authenticationClientFactory.getFormsAuthenticationHandler();
     if (formsAuthenticationHandler != null) {
@@ -320,20 +299,20 @@ public class SharePointRepository implements Repository {
     SharePointRequestContext requestContext =
         new SharePointRequestContext.Builder()
             .setAuthenticationHandler(formsAuthenticationHandler)
-            .setSocketTimeoutMillis(socketTimeoutMillis)
-            .setReadTimeoutMillis(readTimeOutMillis)
-            .setUserAgent(sharepointUserAgent)
+            .setSocketTimeoutMillis(sharepointConfiguration.getWebservicesSocketTimeoutMills())
+            .setReadTimeoutMillis(sharepointConfiguration.getWebservicesReadTimeoutMills())
+            .setUserAgent(sharepointConfiguration.getSharePointUserAgent())
             .build();
     httpClient =
         httpClientBuilder
             .setSharePointRequestContext(requestContext)
             .setMaxRedirectsAllowed(20)
-            .setPerformBrowserLeniency(performBrowserLeniency)
+            .setPerformBrowserLeniency(sharepointConfiguration.isPerformBrowserLeniency())
             .build();
     siteConnectorFactory =
         siteConnectorFactoryBuilder
             .setRequestContext(requestContext)
-            .setXmlValidation(xmlValidation)
+            .setXmlValidation(sharepointConfiguration.isPerformXmlValidation())
             .build();
     initIncrementalCheckpoint = computeIncrementalCheckpoint();
     listItemContentTemplate = ContentTemplate.fromConfiguration("sharepointItem");
@@ -1379,7 +1358,7 @@ public class SharePointRepository implements Repository {
 
   private SharePointUrl buildSharePointUrl(String url) throws URISyntaxException {
     return new SharePointUrl.Builder(url)
-        .setPerformBrowserLeniency(performBrowserLeniency)
+        .setPerformBrowserLeniency(sharepointConfiguration.isPerformBrowserLeniency())
         .build();
   }
 
@@ -1726,143 +1705,5 @@ public class SharePointRepository implements Repository {
       return url;
     }
     return url.substring(0, url.length() - 1);
-  }
-
-  private static class NtlmAuthenticator extends Authenticator {
-    private final String username;
-    private final char[] password;
-    private final Set<String> permittedHosts = new HashSet<String>();
-
-    NtlmAuthenticator(String username, String password) {
-      this.username = username;
-      this.password = password.toCharArray();
-    }
-
-    void addPermitForHost(URL urlContainingHost) {
-      permittedHosts.add(urlToHostString(urlContainingHost));
-    }
-
-    private boolean isPermittedHost(URL toVerify) {
-      return permittedHosts.contains(urlToHostString(toVerify));
-    }
-
-    private String urlToHostString(URL url) {
-      // If the port is missing (so that the default is used), we replace it
-      // with the default port for the protocol in order to prevent being able
-      // to prevent being tricked into connecting to a different port (consider
-      // being configured for https, but then getting tricked to use http and
-      // everything being in the clear).
-      return ""
-          + url.getHost()
-          + ":"
-          + (url.getPort() != -1 ? url.getPort() : url.getDefaultPort());
-    }
-
-    @Override
-    protected PasswordAuthentication getPasswordAuthentication() {
-      URL url = getRequestingURL();
-      if (isPermittedHost(url)) {
-        return new PasswordAuthentication(username, password);
-      } else {
-        return super.getPasswordAuthentication();
-      }
-    }
-  }
-
-  @VisibleForTesting
-  static class SharePointConfiguration {
-    private final SharePointUrl sharePointUrl;
-    private final String virtualServerUrl;
-    private final boolean siteCollectionOnly;
-    private final Set<String> siteCollectionsToInclude;
-
-    @Override
-    public boolean equals(Object o) {
-      if (this == o) {
-        return true;
-      }
-      if ((o == null) || (getClass() != o.getClass())) {
-        return false;
-      }
-      SharePointConfiguration that = (SharePointConfiguration) o;
-      return (siteCollectionOnly == that.siteCollectionOnly) &&
-          Objects.equals(sharePointUrl, that.sharePointUrl) &&
-          Objects.equals(virtualServerUrl, that.virtualServerUrl) &&
-          Objects.equals(siteCollectionsToInclude, that.siteCollectionsToInclude);
-    }
-
-    @Override
-    public int hashCode() {
-      return Objects
-          .hash(sharePointUrl, virtualServerUrl, siteCollectionOnly, siteCollectionsToInclude);
-    }
-
-    private static class Builder {
-      private SharePointUrl sharePointUrl;
-      private String sharePointSiteCollectionOnly = "";
-      private Set<String> siteCollectionsToInclude = new HashSet<String>();
-
-      Builder(SharePointUrl sharePointUrl) {
-        this.sharePointUrl = sharePointUrl;
-      }
-
-      Builder setSharePointSiteCollectionOnly(String sharePointSiteCollectionOnly) {
-        this.sharePointSiteCollectionOnly = sharePointSiteCollectionOnly;
-        return this;
-      }
-
-      @SuppressWarnings("unused")
-      Builder setSiteCollectionsToInclude(Set<String> siteCollectionsToInclude) {
-        this.siteCollectionsToInclude = siteCollectionsToInclude;
-        return this;
-      }
-
-      SharePointConfiguration build() throws URISyntaxException {
-        if ((sharePointUrl == null)
-            || (sharePointSiteCollectionOnly == null)
-            || (siteCollectionsToInclude == null)) {
-          throw new InvalidConfigurationException();
-        }
-        sharePointSiteCollectionOnly = sharePointSiteCollectionOnly.trim();
-        return new SharePointConfiguration(this);
-      }
-
-    }
-    private SharePointConfiguration(Builder builder) throws URISyntaxException {
-      sharePointUrl = builder.sharePointUrl;
-      if (!"".equals(builder.sharePointSiteCollectionOnly)) {
-        // Use config if provided
-        this.siteCollectionOnly = Boolean.parseBoolean(builder.sharePointSiteCollectionOnly);
-      } else {
-        // If Connector is configured against Site Collection URL, we use that as a signal for
-        // Site Collection Only Mode
-        this.siteCollectionOnly = builder.sharePointUrl.getUrl().split("/").length > 3;
-      }
-
-      this.siteCollectionsToInclude =
-          Collections.unmodifiableSet(new HashSet<>(builder.siteCollectionsToInclude));
-      this.virtualServerUrl = sharePointUrl.getRootUrl();
-    }
-
-    boolean isSiteCollectionUrl() {
-      return this.siteCollectionOnly;
-    }
-
-    String getVirtualServerUrl() {
-      return this.virtualServerUrl;
-    }
-
-    SharePointUrl getSharePointUrl() {
-      return this.sharePointUrl;
-    }
-
-    @Override
-    public String toString() {
-      return String.format(
-          "SharePointConfiguration("
-              + "SharePointUrl %s VirtualServer "
-              + "%s SiteCllectionOnly %s SiteCollectionsToInclude %s)",
-          sharePointUrl, virtualServerUrl, siteCollectionOnly, siteCollectionsToInclude);
-    }
   }
 }

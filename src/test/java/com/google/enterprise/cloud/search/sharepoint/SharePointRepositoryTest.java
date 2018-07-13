@@ -660,7 +660,7 @@ public class SharePointRepositoryTest {
     }
     assertEquals(expected.getItem(), returnedDoc.getItem());
     assertEquals(expected.getContentFormat(), returnedDoc.getContentFormat());
-    assertEquals(expected.getIndexItemMode(), returnedDoc.getIndexItemMode());
+    assertEquals(expected.getRequestMode(), returnedDoc.getRequestMode());
   }
 
   @Test

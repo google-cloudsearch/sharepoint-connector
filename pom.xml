@@ -219,9 +219,14 @@
     </dependency>
     <dependency>
       <groupId>com.google.enterprise.cloudsearch</groupId>
-      <artifactId>cloudsearch-connector-sdk</artifactId>
+      <artifactId>google-cloudsearch-indexing-connector-sdk</artifactId>
       <version>v1-0.0.1</version>
-    </dependency>   
+    </dependency>
+    <dependency>
+      <groupId>com.google.enterprise.cloudsearch</groupId>
+      <artifactId>google-cloudsearch-identity-connector-sdk</artifactId>
+      <version>v1-0.0.1</version>
+    </dependency>
     <dependency>
       <groupId>com.sun.xml.ws</groupId>
       <artifactId>jaxws-rt</artifactId>
