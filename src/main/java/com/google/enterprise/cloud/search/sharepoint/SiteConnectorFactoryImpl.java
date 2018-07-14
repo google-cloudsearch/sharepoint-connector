@@ -9,6 +9,7 @@ import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import javax.xml.namespace.QName;
@@ -27,11 +28,13 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
   private final SoapFactory soapFactory;
   private final SharePointRequestContext requestContext;
   private final boolean xmlValidation;
+  private final Optional<ActiveDirectoryClient> activeDirectoryClient;
 
   private SiteConnectorFactoryImpl(Builder builder) {
     soapFactory = checkNotNull(builder.soapFactory);
     requestContext = checkNotNull(builder.requestContext);
     xmlValidation = builder.xmlValidation;
+    activeDirectoryClient = checkNotNull(builder.activeDirectoryClient);
   }
 
   @Override
@@ -128,10 +131,12 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
     private SoapFactory soapFactory;
     private SharePointRequestContext requestContext;
     private boolean xmlValidation;
+    private Optional<ActiveDirectoryClient> activeDirectoryClient;
 
     public Builder() {
       soapFactory = new SoapFactoryImpl();
       xmlValidation = false;
+      activeDirectoryClient = Optional.empty();
     }
 
     public Builder setSoapFactory(SoapFactory soapFactory) {
@@ -146,6 +151,11 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
 
     public Builder setXmlValidation(boolean xmlValidation) {
       this.xmlValidation = xmlValidation;
+      return this;
+    }
+
+    public Builder setActiveDirectoryClient(Optional<ActiveDirectoryClient> activeDirectoryClient) {
+      this.activeDirectoryClient = activeDirectoryClient;
       return this;
     }
 

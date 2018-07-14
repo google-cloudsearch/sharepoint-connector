@@ -17,9 +17,9 @@ import com.microsoft.schemas.sharepoint.soap.UserDescription;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.directory.GetUserCollectionFromSiteResponse;
+import com.microsoft.schemas.sharepoint.soap.directory.GetUserCollectionFromSiteResponse.GetUserCollectionFromSiteResult;
 import com.microsoft.schemas.sharepoint.soap.directory.User;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
-import com.microsoft.schemas.sharepoint.soap.directory.GetUserCollectionFromSiteResponse.GetUserCollectionFromSiteResult;
 import com.microsoft.schemas.sharepoint.soap.people.ArrayOfPrincipalInfo;
 import com.microsoft.schemas.sharepoint.soap.people.ArrayOfString;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -41,14 +42,13 @@ class SiteConnector {
   private static final String OTHER_CLAIMS_PREFIX = "c:0";
   static final long LIST_ITEM_MASK =
       SPBasePermissions.OPEN | SPBasePermissions.VIEWPAGES | SPBasePermissions.VIEWLISTITEMS;
-  private static final String DEFAULT_NAMESPACE = "default";
 
   private final SiteDataClient siteDataClient;
   private final UserGroupSoap userGroup;
   private final PeopleSoap people;
   private final String siteUrl;
   private final String webUrl;
-  private final String defaultNamespace;
+  private final Optional<ActiveDirectoryClient> activeDirectoryClient;
   /**
    * Lock for refreshing MemberIdMapping. We use a unique lock because it is held while waiting on
    * I/O.
@@ -67,7 +67,7 @@ class SiteConnector {
     this.people = builder.people;
     this.siteUrl = builder.siteUrl;
     this.webUrl = builder.webUrl;
-    this.defaultNamespace = builder.defaultNamespace;
+    this.activeDirectoryClient = Optional.ofNullable(builder.activeDirectoryClient);
   }
 
   SiteDataClient getSiteDataClient() {
@@ -128,7 +128,9 @@ class SiteConnector {
         continue;
       }
       boolean isGroup = p.getPrincipalType() == SPPrincipalType.SECURITY_GROUP;
-      String accountName = getLoginNameForPrincipal(p.getAccountName(), p.getDisplayName());
+      String accountName =
+          getLoginNameForPrincipal(
+              p.getAccountName(), p.getDisplayName(), policyUser.getSid(), isGroup);
       if (accountName == null) {
         log.log(Level.WARNING, "Unable to decode claim. Skipping policy user {0}", loginName);
         continue;
@@ -136,9 +138,9 @@ class SiteConnector {
       log.log(Level.FINER, "Policy User accountName = {0}", accountName);
       Principal principal;
       if (isGroup) {
-        principal = Acl.getGroupPrincipal(Acl.getPrincipalName(accountName, defaultNamespace));
+        principal = Acl.getGroupPrincipal(accountName);
       } else {
-        principal = Acl.getUserPrincipal(Acl.getPrincipalName(accountName, defaultNamespace));
+        principal = Acl.getUserPrincipal(accountName);
       }
       long grant = policyUser.getGrantMask().longValue();
       if ((necessaryPermissionMask & grant) == necessaryPermissionMask) {
@@ -334,7 +336,9 @@ class SiteConnector {
           (user.getIsDomainGroup()
               == com.microsoft.schemas.sharepoint.soap.directory.TrueFalseType.TRUE);
 
-      String userName = getLoginNameForPrincipal(user.getLoginName(), user.getName());
+      String userName =
+          getLoginNameForPrincipal(
+              user.getLoginName(), user.getName(), user.getSid(), isDomainGroup);
       if (userName == null) {
         log.log(
             Level.WARNING,
@@ -343,13 +347,9 @@ class SiteConnector {
         continue;
       }
       if (isDomainGroup) {
-        map.put(
-            (int) user.getID(),
-            Acl.getGroupPrincipal(Acl.getPrincipalName(userName, defaultNamespace)));
+        map.put((int) user.getID(), Acl.getGroupPrincipal(userName));
       } else {
-        map.put(
-            (int) user.getID(),
-            Acl.getUserPrincipal(Acl.getPrincipalName(userName, defaultNamespace)));
+        map.put((int) user.getID(), Acl.getUserPrincipal(userName));
       }
     }
     mapping = new MemberIdMapping(map);
@@ -403,18 +403,35 @@ class SiteConnector {
 
   private Principal userDescriptionToPrincipal(UserDescription user) {
     boolean isDomainGroup = (user.getIsDomainGroup() == TrueFalseType.TRUE);
-    String userName = getLoginNameForPrincipal(user.getLoginName(), user.getName());
+    String userName =
+        getLoginNameForPrincipal(user.getLoginName(), user.getName(), user.getSid(), isDomainGroup);
     if (userName == null) {
       return null;
     }
     if (isDomainGroup) {
-      return Acl.getGroupPrincipal(Acl.getPrincipalName(userName, defaultNamespace));
+      return Acl.getGroupPrincipal(userName);
     } else {
-      return Acl.getUserPrincipal(Acl.getPrincipalName(userName, defaultNamespace));
+      return Acl.getUserPrincipal(userName);
     }
   }
 
-  private String getLoginNameForPrincipal(String loginName, String displayName) {
+  private String getLoginNameForPrincipal(
+      String loginName, String displayName, String sid, boolean isDomainGroup) {
+    if (isDomainGroup && activeDirectoryClient.isPresent() && loginName.startsWith("c:0+.w|")) {
+      try {
+        checkArgument(!Strings.isNullOrEmpty(sid), "sid can not be null or empty for lookup");
+        return activeDirectoryClient.get().getUserAccountBySid(sid);
+      } catch (IOException ex) {
+        log.log(
+            Level.WARNING,
+            String.format(
+                "Error performing SID lookup for "
+                    + "User %s. Returing display name %s as fallback.",
+                loginName, displayName),
+            ex);
+        return displayName;
+      }
+    }
     return decodeClaim(loginName, displayName);
   }
 
@@ -466,16 +483,11 @@ class SiteConnector {
     private PeopleSoap people;
     private String siteUrl;
     private String webUrl;
-    private String defaultNamespace = DEFAULT_NAMESPACE;
+    private ActiveDirectoryClient activeDirectoryClient;
 
     Builder(String siteUrl, String webUrl) {
       this.siteUrl = siteUrl;
       this.webUrl = webUrl;
-    }
-
-    Builder setDefaultNamespace(String defaultNamespace) {
-      this.defaultNamespace = defaultNamespace;
-      return this;
     }
 
     Builder setSiteDataClient(SiteDataClient siteDataClient) {

@@ -133,7 +133,7 @@ public class SiteConnectorTest {
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
             .build();
-    Principal spUser1 = Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
+    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
     Principal teamSiteOwners =
         Acl.getGroupPrincipal(
             Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
@@ -209,14 +209,12 @@ public class SiteConnectorTest {
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
             .build();
-    Principal spUser1 = Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
+    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
     Principal teamSiteOwners =
         Acl.getGroupPrincipal(
             Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
-    Principal admin =
-        Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\administrator", "default"));
-    Principal group300 =
-        Acl.getGroupPrincipal(Acl.getPrincipalName("group300@gdc-psl.com", "default"));
+    Principal admin = Acl.getUserPrincipal("GDC-PSL\\administrator");
+    Principal group300 = Acl.getGroupPrincipal("group300@gdc-psl.com");
     assertEquals(Arrays.asList(spUser1, teamSiteOwners, admin, group300), sc.getListAcl(list));
   }
 
@@ -238,7 +236,7 @@ public class SiteConnectorTest {
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
             .build();
-    Principal spUser1 = Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"));
+    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
     Principal teamSiteOwners =
         Acl.getGroupPrincipal(
             Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
@@ -272,8 +270,8 @@ public class SiteConnectorTest {
     web.getUsers().getUser().addAll(Arrays.asList(user1, group1, userRegular, userInvalidLogin));
     List<Principal> expected =
         Arrays.asList(
-            Acl.getUserPrincipal(Acl.getPrincipalName("DOMAIN\\user1Admin", "default")),
-            Acl.getGroupPrincipal(Acl.getPrincipalName("DOMAIN\\group1Admin", "default")));
+            Acl.getUserPrincipal("DOMAIN\\user1Admin"),
+            Acl.getGroupPrincipal("DOMAIN\\group1Admin"));
     assertEquals(expected, sc.getSiteCollectionAdmins(web));
   }
 
@@ -316,15 +314,11 @@ public class SiteConnectorTest {
             .build();
     Acl expected =
         new Acl.Builder()
-            .setDeniedReaders(
-                Collections.singletonList(
-                    Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default"))))
+            .setDeniedReaders(Collections.singletonList(Acl.getUserPrincipal("GDC-PSL\\spuser1")))
             .setReaders(
                 Arrays.asList(
-                    Acl.getGroupPrincipal(
-                        Acl.getPrincipalName("NT AUTHORITY\\LOCAL SERVICE", "default")),
-                    Acl.getUserPrincipal(
-                        Acl.getPrincipalName("GDC-PSL\\Administrator", "default"))))
+                    Acl.getGroupPrincipal("NT AUTHORITY\\LOCAL SERVICE"),
+                    Acl.getUserPrincipal("GDC-PSL\\Administrator")))
             .build();
     assertEquals(expected, sc.getWebApplicationPolicyAcl(vs));
   }

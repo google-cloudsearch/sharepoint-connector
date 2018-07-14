@@ -64,6 +64,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.xml.ws.Holder;
@@ -111,6 +112,8 @@ public class SharePointRepositoryTest {
         .thenReturn(siteConnectorFactoryBuilder);
     when(siteConnectorFactoryBuilder.setXmlValidation(false))
         .thenReturn(siteConnectorFactoryBuilder);
+    when(siteConnectorFactoryBuilder.setActiveDirectoryClient(any()))
+        .thenReturn(siteConnectorFactoryBuilder);
     when(siteConnectorFactoryBuilder.build()).thenReturn(siteConnectorFactory);
   }
 
@@ -151,6 +154,7 @@ public class SharePointRepositoryTest {
     inOrder.verify(httpClientBuilder).build();
     inOrder.verify(siteConnectorFactoryBuilder).setRequestContext(requestContext);
     inOrder.verify(siteConnectorFactoryBuilder).setXmlValidation(false);
+    inOrder.verify(siteConnectorFactoryBuilder).setActiveDirectoryClient(Optional.empty());
     inOrder.verify(siteConnectorFactoryBuilder).build();
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
   }
@@ -197,6 +201,7 @@ public class SharePointRepositoryTest {
     inOrder.verify(httpClientBuilder).build();
     inOrder.verify(siteConnectorFactoryBuilder).setRequestContext(requestContext);
     inOrder.verify(siteConnectorFactoryBuilder).setXmlValidation(true);
+    inOrder.verify(siteConnectorFactoryBuilder).setActiveDirectoryClient(Optional.empty());
     inOrder.verify(siteConnectorFactoryBuilder).build();
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
   }
@@ -368,8 +373,8 @@ public class SharePointRepositoryTest {
             .build();
     List<Principal> admins =
         Arrays.asList(
-            Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\administrator", "default")),
-            Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default")));
+            Acl.getUserPrincipal("GDC-PSL\\administrator"),
+            Acl.getUserPrincipal("GDC-PSL\\spuser1"));
     Acl adminAcl =
         new Acl.Builder()
             .setReaders(admins)
@@ -1346,7 +1351,7 @@ public class SharePointRepositoryTest {
           .setInheritFrom(aclParent)
           .setReaders(
               Arrays.asList(
-                  Acl.getUserPrincipal(Acl.getPrincipalName("GDC-PSL\\spuser1", "default")),
+                  Acl.getUserPrincipal("GDC-PSL\\spuser1"),
                   Acl.getGroupPrincipal(
                       Acl.getPrincipalName("TeamSite Owners", "http://localhost:1")),
                   Acl.getGroupPrincipal(

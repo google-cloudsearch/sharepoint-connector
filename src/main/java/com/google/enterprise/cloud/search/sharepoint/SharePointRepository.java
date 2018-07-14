@@ -27,6 +27,7 @@ import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterable;
 import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterableImpl;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.RepositoryException;
+import com.google.enterprise.cloudsearch.sdk.StartupException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
@@ -309,10 +310,17 @@ public class SharePointRepository implements Repository {
             .setMaxRedirectsAllowed(20)
             .setPerformBrowserLeniency(sharepointConfiguration.isPerformBrowserLeniency())
             .build();
+    Optional<ActiveDirectoryClient> activeDirectorClient;
+    try {
+      activeDirectorClient = ActiveDirectoryClient.fromConfiguration();
+    } catch (IOException e) {
+      throw new StartupException("Unable to create instance of ActiveDirectoryClient", e);
+    }
     siteConnectorFactory =
         siteConnectorFactoryBuilder
             .setRequestContext(requestContext)
             .setXmlValidation(sharepointConfiguration.isPerformXmlValidation())
+            .setActiveDirectoryClient(activeDirectorClient)
             .build();
     initIncrementalCheckpoint = computeIncrementalCheckpoint();
     listItemContentTemplate = ContentTemplate.fromConfiguration("sharepointItem");
