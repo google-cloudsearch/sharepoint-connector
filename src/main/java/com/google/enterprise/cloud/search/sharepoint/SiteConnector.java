@@ -6,6 +6,8 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
+import com.google.enterprise.cloudsearch.sdk.identity.IdentityGroup;
+import com.google.enterprise.cloudsearch.sdk.identity.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.microsoft.schemas.sharepoint.soap.GroupMembership;
 import com.microsoft.schemas.sharepoint.soap.Permission;
@@ -27,6 +29,7 @@ import com.microsoft.schemas.sharepoint.soap.people.PrincipalInfo;
 import com.microsoft.schemas.sharepoint.soap.people.SPPrincipalType;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -223,6 +226,11 @@ class SiteConnector {
 
   List<Principal> getScopeAcl(Scope scope) throws IOException {
     return generateAcl(scope.getPermission(), LIST_ITEM_MASK);
+  }
+
+  public List<IdentityGroup> getSharePointGroups(RepositoryContext repositoryContext) {
+    // TODO(tvartak) : Replace with actual implementation.
+    return Collections.emptyList();
   }
 
   private List<Principal> generateAcl(
