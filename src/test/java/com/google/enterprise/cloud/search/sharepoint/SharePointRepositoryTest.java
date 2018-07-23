@@ -1353,11 +1353,14 @@ public class SharePointRepositoryTest {
               Arrays.asList(
                   Acl.getUserPrincipal("GDC-PSL\\spuser1"),
                   Acl.getGroupPrincipal(
-                      Acl.getPrincipalName("TeamSite Owners", "http://localhost:1")),
+                      SiteConnector.encodeSharePointLocalGroupName(
+                          "http://localhost:1", "TeamSite Owners")),
                   Acl.getGroupPrincipal(
-                      Acl.getPrincipalName("TeamSite Visitors", "http://localhost:1")),
+                      SiteConnector.encodeSharePointLocalGroupName(
+                          "http://localhost:1", "TeamSite Visitors")),
                   Acl.getGroupPrincipal(
-                      Acl.getPrincipalName("TeamSite Members", "http://localhost:1"))))
+                      SiteConnector.encodeSharePointLocalGroupName(
+                          "http://localhost:1", "TeamSite Members"))))
           .build()
           .applyTo(item);
     }

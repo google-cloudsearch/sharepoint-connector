@@ -136,7 +136,8 @@ public class SiteConnectorTest {
     Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
     Principal teamSiteOwners =
         Acl.getGroupPrincipal(
-            Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
+            SiteConnector.encodeSharePointLocalGroupName(
+                "http://localhost:1/sites/SiteCollection", "TeamSite Owners"));
     assertEquals(Arrays.asList(spUser1, teamSiteOwners), sc.getWebAcls(web));
   }
 
@@ -212,7 +213,8 @@ public class SiteConnectorTest {
     Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
     Principal teamSiteOwners =
         Acl.getGroupPrincipal(
-            Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
+            SiteConnector.encodeSharePointLocalGroupName(
+                "http://localhost:1/sites/SiteCollection", "TeamSite Owners"));
     Principal admin = Acl.getUserPrincipal("GDC-PSL\\administrator");
     Principal group300 = Acl.getGroupPrincipal("group300@gdc-psl.com");
     assertEquals(Arrays.asList(spUser1, teamSiteOwners, admin, group300), sc.getListAcl(list));
@@ -238,8 +240,7 @@ public class SiteConnectorTest {
             .build();
     Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
     Principal teamSiteOwners =
-        Acl.getGroupPrincipal(
-            Acl.getPrincipalName("TeamSite Owners", "http://localhost:1/sites/SiteCollection"));
+        Acl.getGroupPrincipal("[http://localhost:1/sites/SiteCollection]TeamSite Owners");
     assertEquals(Arrays.asList(spUser1, teamSiteOwners), sc.getScopeAcl(scope));
   }
 

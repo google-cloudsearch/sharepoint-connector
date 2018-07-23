@@ -43,6 +43,7 @@ class SiteConnector {
   private static final Logger log = Logger.getLogger(SiteConnector.class.getName());
   private static final String IDENTITY_CLAIMS_PREFIX = "i:0";
   private static final String OTHER_CLAIMS_PREFIX = "c:0";
+  private static final String SHAREPOINT_LOCAL_GROUP_FORMAT = "[%s]%s";
   static final long LIST_ITEM_MASK =
       SPBasePermissions.OPEN | SPBasePermissions.VIEWPAGES | SPBasePermissions.VIEWLISTITEMS;
 
@@ -190,6 +191,11 @@ class SiteConnector {
     return webUrl.substring(0, slashIndex);
   }
 
+  @VisibleForTesting
+  static String encodeSharePointLocalGroupName(String siteIdentifier, String groupName) {
+    return String.format(SHAREPOINT_LOCAL_GROUP_FORMAT, siteIdentifier, groupName);
+  }
+
   /** Returns true if webUrl is a site collection. */
   private boolean isWebSiteCollection() {
     return siteUrl.equals(webUrl);
@@ -300,9 +306,10 @@ class SiteConnector {
     Site site = siteDataClient.getContentSite();
     Map<Integer, Principal> map = new HashMap<Integer, Principal>();
     for (GroupMembership.Group group : site.getGroups().getGroup()) {
-      String sharepointLocalGroup =
-          Acl.getPrincipalName(group.getGroup().getName(), site.getMetadata().getURL());
-      Principal localGroup = Acl.getGroupPrincipal(sharepointLocalGroup);
+      Principal localGroup =
+          Acl.getGroupPrincipal(
+              encodeSharePointLocalGroupName(
+                  site.getMetadata().getURL(), group.getGroup().getName()));
       map.put(group.getGroup().getID(), localGroup);
     }
     for (UserDescription user : site.getWeb().getUsers().getUser()) {
