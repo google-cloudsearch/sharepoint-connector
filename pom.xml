@@ -13,7 +13,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <java_version>1.8</java_version>
     <wsdlLocation>
-      src/main/resources/com/google/enterprise/cloud/search/sharepoint/wsdl
+      src/main/resources/com/google/enterprise/cloudsearch/sharepoint/wsdl
     </wsdlLocation>
   </properties>
   <build>
@@ -118,7 +118,7 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>com.google.enterprise.cloud.search.sharepoint.SharePointRepositoryConnector</mainClass>
+              <mainClass>com.google.enterprise.cloudsearch.sharepoint.SharePointRepositoryConnector</mainClass>
               <addClasspath>true</addClasspath>
             </manifest>
             <manifestEntries>
