@@ -118,7 +118,7 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>com.google.enterprise.adaptor.sharepoint.SharePointConnector</mainClass>
+              <mainClass>com.google.enterprise.cloud.search.sharepoint.SharePointRepositoryConnector</mainClass>
               <addClasspath>true</addClasspath>
             </manifest>
             <manifestEntries>
