@@ -3,10 +3,15 @@ package com.google.enterprise.cloudsearch.sharepoint;
 import static org.hamcrest.CoreMatchers.anything;
 import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.not;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.google.api.services.cloudidentity.v1beta1.model.EntityKey;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Streams;
 import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterable;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration.ResetConfigRule;
@@ -14,11 +19,15 @@ import com.google.enterprise.cloudsearch.sdk.config.Configuration.SetupConfigRul
 import com.google.enterprise.cloudsearch.sdk.identity.IdentityGroup;
 import com.google.enterprise.cloudsearch.sdk.identity.RepositoryContext;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabase;
+import com.microsoft.schemas.sharepoint.soap.Site;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -35,11 +44,11 @@ public class SharePointIdentityRepositoryTest {
 
   @Mock SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
   @Mock SiteConnectorFactoryImpl siteConnectorFactory;
-  @Mock SiteConnector siteConnector;
   @Mock SiteDataClient siteDataClient;
   @Mock PeopleSoap peopleSoap;
   @Mock UserGroupSoap userGroupSoap;
-  @Mock RepositoryContext repoContext;
+  @Mock ActiveDirectoryClient activeDirectoryClient;
+  RepositoryContext repoContext;
 
   @Before
   public void setup() {
@@ -92,7 +101,42 @@ public class SharePointIdentityRepositoryTest {
     repo.init(repoContext);
     setupVirtualServerForGroups();
     CheckpointCloseableIterable<IdentityGroup> groups = repo.listGroups(null /* Checkpoint */);
-    assertThat(groups, not(hasItem(anything())));
+    IdentityGroup teamOwners =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName("http://localhost:1", "TeamSite Owners"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamMembers =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName("http://localhost:1", "TeamSite Members"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamVisitors =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName("http://localhost:1", "TeamSite Visitors"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamOwnersSC =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName(
+                "http://localhost:1/sites/SiteCollection", "TeamSite Owners"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamMembersSC =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName(
+                "http://localhost:1/sites/SiteCollection", "TeamSite Members"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamVisitorsSC =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName(
+                "http://localhost:1/sites/SiteCollection", "TeamSite Visitors"),
+            () -> ImmutableSet.of());
+    Set<EntityKey> actual =
+        Streams.stream(groups).map(g -> g.getGroupKey()).collect(Collectors.toSet());
+    Set<EntityKey> expected =
+        Arrays.asList(
+                teamOwners, teamMembers, teamVisitors, teamOwnersSC, teamMembersSC, teamVisitorsSC)
+            .stream()
+            .map(g -> g.getGroupKey())
+            .collect(Collectors.toSet());
+    assertEquals(expected, actual);
   }
 
   @Test
@@ -103,9 +147,30 @@ public class SharePointIdentityRepositoryTest {
     baseConfig.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(baseConfig);
     repo.init(repoContext);
-    setupSiteCollectionForGroups("http://localhost:1");
+    String xml = SharePointResponseHelper.getSiteCollectionResponse();
+        setupSiteCollectionForGroups(
+            "http://localhost:1", xml.replaceAll("/sites/SiteCollection", ""));
     CheckpointCloseableIterable<IdentityGroup> groups = repo.listGroups(null /* Checkpoint */);
-    assertThat(groups, not(hasItem(anything())));
+    IdentityGroup teamOwners =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName("http://localhost:1", "TeamSite Owners"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamMembers =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName("http://localhost:1", "TeamSite Members"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamVisitors =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName("http://localhost:1", "TeamSite Visitors"),
+            () -> ImmutableSet.of());
+    Set<EntityKey> actual =
+        Streams.stream(groups).map(g -> g.getGroupKey()).collect(Collectors.toSet());
+    Set<EntityKey> expected =
+        Arrays.asList(teamOwners, teamMembers, teamVisitors)
+            .stream()
+            .map(g -> g.getGroupKey())
+            .collect(Collectors.toSet());
+    assertEquals(expected, actual);
   }
 
   @Test
@@ -116,9 +181,32 @@ public class SharePointIdentityRepositoryTest {
     baseConfig.put("sharepoint.server", "http://localhost:1/sites/SiteCollection");
     overrideConfig(baseConfig);
     repo.init(repoContext);
-    setupSiteCollectionForGroups("http://localhost:1/sites/SiteCollection");
+    String xml = SharePointResponseHelper.getSiteCollectionResponse();
+    setupSiteCollectionForGroups("http://localhost:1/sites/SiteCollection", xml);
     CheckpointCloseableIterable<IdentityGroup> groups = repo.listGroups(null /* Checkpoint */);
-    assertThat(groups, not(hasItem(anything())));
+    IdentityGroup teamOwners =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName(
+                "http://localhost:1/sites/SiteCollection", "TeamSite Owners"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamMembers =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName(
+                "http://localhost:1/sites/SiteCollection", "TeamSite Members"),
+            () -> ImmutableSet.of());
+    IdentityGroup teamVisitors =
+        repoContext.buildIdentityGroup(
+            SiteConnector.encodeSharePointLocalGroupName(
+                "http://localhost:1/sites/SiteCollection", "TeamSite Visitors"),
+            () -> ImmutableSet.of());
+    Set<EntityKey> actual =
+        Streams.stream(groups).map(g -> g.getGroupKey()).collect(Collectors.toSet());
+    Set<EntityKey> expected =
+        Arrays.asList(teamOwners, teamMembers, teamVisitors)
+            .stream()
+            .map(g -> g.getGroupKey())
+            .collect(Collectors.toSet());
+    assertEquals(expected, actual);
   }
 
   private Properties getBaseConfig() {
@@ -126,28 +214,60 @@ public class SharePointIdentityRepositoryTest {
     properties.put("sharepoint.server", "http://localhost:1");
     properties.put("sharepoint.username", "user");
     properties.put("sharepoint.password", "password");
+    properties.put("api.identitySourceId", "idSource1");
     return properties;
   }
 
   private void overrideConfig(Properties properties) {
     setupConfig.initConfig(properties);
+    repoContext = RepositoryContext.fromConfiguration();
   }
 
   private void setupVirtualServerForGroups() throws IOException {
-    setupSiteCollectionForGroups("http://localhost:1");
-    setupSiteCollectionForGroups("http://localhost:1/sites/SiteCollection");
+    String xml = SharePointResponseHelper.getSiteCollectionResponse();
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .setActiveDirectoryClient(activeDirectoryClient)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    Site site =
+        SiteDataClient.jaxbParse(xml.replaceAll("/sites/SiteCollection", ""), Site.class, false);
+    when(siteDataClient.getContentSite()).thenReturn(site);
+    SiteDataClient siteDataClientSC = mock(SiteDataClient.class);
+    SiteConnector scCollection =
+        new SiteConnector.Builder(
+                "http://localhost:1/sites/SiteCollection",
+                "http://localhost:1/sites/SiteCollection")
+            .setSiteDataClient(siteDataClientSC)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .setActiveDirectoryClient(activeDirectoryClient)
+            .build();
+    when(siteConnectorFactory.getInstance(
+            "http://localhost:1/sites/SiteCollection", "http://localhost:1/sites/SiteCollection"))
+        .thenReturn(scCollection);
+    Site siteSC = SiteDataClient.jaxbParse(xml, Site.class, false);
+    when(siteDataClientSC.getContentSite()).thenReturn(siteSC);
     setupVirualServer();
     setupContentDb("{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}");
   }
 
-  private void setupSiteCollectionForGroups(String siteCollectionUrl) throws IOException {
+  private void setupSiteCollectionForGroups(String siteCollectionUrl, String xml)
+      throws IOException {
     SiteConnector scRoot =
         new SiteConnector.Builder(siteCollectionUrl, siteCollectionUrl)
             .setSiteDataClient(siteDataClient)
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
+            .setActiveDirectoryClient(activeDirectoryClient)
             .build();
     when(siteConnectorFactory.getInstance(siteCollectionUrl, siteCollectionUrl)).thenReturn(scRoot);
+    Site site = SiteDataClient.jaxbParse(xml, Site.class, false);
+    when(siteDataClient.getContentSite()).thenReturn(site);
   }
 
   private void setupVirualServer() throws IOException {

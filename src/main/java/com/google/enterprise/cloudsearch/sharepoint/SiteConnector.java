@@ -3,9 +3,15 @@ package com.google.enterprise.cloudsearch.sharepoint;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import com.google.api.services.cloudidentity.v1beta1.model.EntityKey;
+import com.google.api.services.cloudidentity.v1beta1.model.Membership;
+import com.google.api.services.cloudidentity.v1beta1.model.MembershipRole;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
+import com.google.common.base.Supplier;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.enterprise.cloudsearch.sdk.identity.IdentityGroup;
 import com.google.enterprise.cloudsearch.sdk.identity.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
@@ -16,6 +22,7 @@ import com.microsoft.schemas.sharepoint.soap.Scopes.Scope;
 import com.microsoft.schemas.sharepoint.soap.Site;
 import com.microsoft.schemas.sharepoint.soap.TrueFalseType;
 import com.microsoft.schemas.sharepoint.soap.UserDescription;
+import com.microsoft.schemas.sharepoint.soap.Users;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.directory.GetUserCollectionFromSiteResponse;
@@ -29,12 +36,12 @@ import com.microsoft.schemas.sharepoint.soap.people.PrincipalInfo;
 import com.microsoft.schemas.sharepoint.soap.people.SPPrincipalType;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -44,6 +51,9 @@ class SiteConnector {
   private static final String IDENTITY_CLAIMS_PREFIX = "i:0";
   private static final String OTHER_CLAIMS_PREFIX = "c:0";
   private static final String SHAREPOINT_LOCAL_GROUP_FORMAT = "[%s]%s";
+  private static final Supplier<Set<Membership>> EMPTY_MEMBERSHIP = () -> ImmutableSet.of();
+  private static final ImmutableList<MembershipRole> MEMBER_ROLES =
+      ImmutableList.of(new MembershipRole().setName("MEMBER"));
   static final long LIST_ITEM_MASK =
       SPBasePermissions.OPEN | SPBasePermissions.VIEWPAGES | SPBasePermissions.VIEWLISTITEMS;
 
@@ -234,9 +244,84 @@ class SiteConnector {
     return generateAcl(scope.getPermission(), LIST_ITEM_MASK);
   }
 
-  public List<IdentityGroup> getSharePointGroups(RepositoryContext repositoryContext) {
-    // TODO(tvartak) : Replace with actual implementation.
-    return Collections.emptyList();
+  public List<IdentityGroup> getSharePointGroups(RepositoryContext repositoryContext)
+      throws IOException {
+    Site site = siteDataClient.getContentSite();
+    ImmutableList.Builder<IdentityGroup> groups = new ImmutableList.Builder<>();
+    for (GroupMembership.Group group : site.getGroups().getGroup()) {
+      String localGroup =
+          encodeSharePointLocalGroupName(site.getMetadata().getURL(), group.getGroup().getName());
+      Users users = group.getUsers();
+      if (users == null) {
+        groups.add(repositoryContext.buildIdentityGroup(localGroup, EMPTY_MEMBERSHIP));
+        continue;
+      }
+      List<UserDescription> members = users.getUser();
+      if (members == null) {
+        groups.add(repositoryContext.buildIdentityGroup(localGroup, EMPTY_MEMBERSHIP));
+        continue;
+      }
+      ImmutableSet.Builder<Membership> groupMembers = new ImmutableSet.Builder<>();
+      for (UserDescription member : members) {
+        getMembership(member, repositoryContext).ifPresent(groupMembers::add);
+      }
+      groups.add(repositoryContext.buildIdentityGroup(localGroup, () -> groupMembers.build()));
+    }
+    return groups.build();
+  }
+
+  private Optional<Membership> getMembership(UserDescription user, RepositoryContext context)
+      throws IOException {
+    boolean isDomainGroup = (user.getIsDomainGroup() == TrueFalseType.TRUE);
+    EntityKey memberKey = null;
+    if (isDomainGroup) {
+      String groupId =
+          getLoginNameForPrincipal(
+              user.getLoginName(), user.getName(), user.getSid(), isDomainGroup);
+      if (!Strings.isNullOrEmpty(groupId)) {
+        ActiveDirectoryPrincipal groupPrincipal = ActiveDirectoryPrincipal.parse(groupId);
+        if (!Strings.isNullOrEmpty(groupPrincipal.getDomain())) {
+          // This is domain group.
+          Optional<RepositoryContext> domainContext =
+              context.getRepositoryContextForReferenceIdentitySource(groupPrincipal.getDomain());
+          if (domainContext.isPresent()) {
+            memberKey = domainContext.get().buildEntityKeyForGroup(groupId);
+          } else {
+            log.log(
+                Level.WARNING,
+                "Identity source configuration not available for principal {0}",
+                groupPrincipal);
+          }
+        }
+      }
+    } else {
+      memberKey = getUserMembership(user).orElse(null);
+    }
+    if (memberKey == null) {
+      log.log(
+          Level.WARNING,
+          "Unable to resolve membership for user [name = {0}, loginName: {1}]",
+          new Object[] {user.getName(), user.getLoginName()});
+      return Optional.empty();
+    }
+    return Optional.of(new Membership().setMemberKey(memberKey).setRoles(MEMBER_ROLES));
+  }
+
+  private Optional<EntityKey> getUserMembership(UserDescription user) throws IOException {
+    if (!Strings.isNullOrEmpty(user.getEmail())) {
+      return Optional.of(new EntityKey().setId(user.getEmail()));
+    }
+    if (activeDirectoryClient.isPresent()) {
+      String loginName = decodeClaim(user.getLoginName(), user.getName());
+      ActiveDirectoryPrincipal principal = ActiveDirectoryPrincipal.parse(loginName);
+      String userEmailByAccountName =
+          activeDirectoryClient.get().getUserEmailByPrincipal(principal);
+      if (Strings.isNullOrEmpty(userEmailByAccountName)) {
+        return Optional.empty();
+      }
+      return Optional.of(new EntityKey().setId(userEmailByAccountName));
+    }
+    return Optional.empty();
   }
 
   private List<Principal> generateAcl(
@@ -432,9 +517,11 @@ class SiteConnector {
 
   private String getLoginNameForPrincipal(
       String loginName, String displayName, String sid, boolean isDomainGroup) {
-    if (isDomainGroup && activeDirectoryClient.isPresent() && loginName.startsWith("c:0+.w|")) {
+    if (isDomainGroup
+        && activeDirectoryClient.isPresent()
+        && loginName.startsWith("c:0+.w|")
+        && !Strings.isNullOrEmpty(sid)) {
       try {
-        checkArgument(!Strings.isNullOrEmpty(sid), "sid can not be null or empty for lookup");
         return activeDirectoryClient.get().getUserAccountBySid(sid);
       } catch (IOException ex) {
         log.log(
@@ -517,6 +604,11 @@ class SiteConnector {
 
     Builder setPeople(PeopleSoap people) {
       this.people = people;
+      return this;
+    }
+
+    Builder setActiveDirectoryClient(ActiveDirectoryClient activeDirectoryClient) {
+      this.activeDirectoryClient = activeDirectoryClient;
       return this;
     }
 

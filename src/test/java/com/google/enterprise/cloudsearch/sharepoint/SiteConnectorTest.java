@@ -1,12 +1,22 @@
 package com.google.enterprise.cloudsearch.sharepoint;
 
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.google.api.services.cloudidentity.v1beta1.model.EntityKey;
+import com.google.api.services.cloudidentity.v1beta1.model.Membership;
+import com.google.api.services.cloudidentity.v1beta1.model.MembershipRole;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.enterprise.cloudsearch.sdk.identity.IdentityGroup;
+import com.google.enterprise.cloudsearch.sdk.identity.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sharepoint.SiteConnector.SPBasePermissions;
 import com.microsoft.schemas.sharepoint.soap.ACL;
@@ -35,6 +45,8 @@ import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Rule;
 import org.junit.Test;
@@ -50,6 +62,7 @@ public class SiteConnectorTest {
   @Mock SiteDataSoap siteDataSoap;
   @Mock PeopleSoap peopleSoap;
   @Mock UserGroupSoap userGroupSoap;
+  @Mock ActiveDirectoryClient adLookupClient;
 
   @Test
   public void testBuilder() {
@@ -277,6 +290,57 @@ public class SiteConnectorTest {
   }
 
   @Test
+  public void testGetSharePointGroups() throws IOException {
+    String siteUrl = "http://localhost:1/sites/SiteCollection";
+    SiteConnector sc =
+        new SiteConnector.Builder(siteUrl, siteUrl)
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .setActiveDirectoryClient(adLookupClient)
+            .build();
+    setupGetContentSite(loadTestResponse("sites-SiteCollection-sc.xml"));
+    ActiveDirectoryPrincipal spUser2 = ActiveDirectoryPrincipal.parse("GDC-PSL\\spuser2");
+    when(adLookupClient.getUserEmailByPrincipal(spUser2)).thenReturn("spuser2@mygoogledomain.com");
+    EntityKey spuser2Key = new EntityKey().setId("spuser2@mygoogledomain.com");
+    Membership spuser2Membership =
+        new Membership()
+            .setMemberKey(spuser2Key)
+            .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
+    RepositoryContext context = mock(RepositoryContext.class);
+    RepositoryContext referenceContext = mock(RepositoryContext.class);
+    when(context.getRepositoryContextForReferenceIdentitySource("BUILTIN"))
+        .thenReturn(Optional.of(referenceContext));
+    EntityKey builtinUsersKey =
+        new EntityKey().setId("BUILTIN\\users").setNamespace("idSourceBuiltin");
+    Membership builtinUsersMembership =
+        new Membership()
+            .setMemberKey(builtinUsersKey)
+            .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
+    when(referenceContext.buildEntityKeyForGroup("BUILTIN\\users"))
+        .thenReturn(builtinUsersKey);
+    EntityKey adminKey = new EntityKey().setId("admin@mygoogledomain.com");
+    Membership adminMembership =
+        new Membership()
+            .setMemberKey(adminKey)
+            .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
+    IdentityGroup teamOwners =
+        setupIdentityGroupOnContext(
+            context, siteUrl, "TeamSite Owners", ImmutableSet.of(adminMembership));
+    IdentityGroup teamMembers =
+        setupIdentityGroupOnContext(
+            context,
+            siteUrl,
+            "TeamSite Members",
+            ImmutableSet.of(builtinUsersMembership, spuser2Membership));
+    IdentityGroup teamVisitors =
+        setupIdentityGroupOnContext(context, siteUrl, "TeamSite Visitors", ImmutableSet.of());
+    assertThat(
+        sc.getSharePointGroups(context),
+        equalTo(ImmutableList.of(teamOwners, teamMembers, teamVisitors)));
+  }
+
+  @Test
   public void testWebAppPolicyAcl() throws IOException {
     VirtualServer vs =
         SiteDataClient.jaxbParse(loadTestResponse("vs.xml"), VirtualServer.class, false);
@@ -379,6 +443,24 @@ public class SiteConnectorTest {
 
   private UserDescription createGroup(int id, String login, String name) {
     return createUserDescription(id, login, name, TrueFalseType.TRUE);
+  }
+
+  private IdentityGroup setupIdentityGroupOnContext(
+      RepositoryContext context, String siteUrl, String groupName, Set<Membership> members) {
+    String groupId = SiteConnector.encodeSharePointLocalGroupName(siteUrl, groupName);
+    IdentityGroup toReturn =
+        new IdentityGroup.Builder()
+            .setGroupIdentity(groupId)
+            .setGroupKey(new EntityKey().setNamespace("idSource1").setId(groupId))
+            .setMembers(members)
+            .build();
+    doAnswer(
+            invocation -> {
+              return toReturn;
+            })
+        .when(context)
+        .buildIdentityGroup(eq(groupId), any());
+    return toReturn;
   }
 
   private UserDescription createUserDescription(

@@ -60,6 +60,7 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
             .setSiteDataClient(new SiteDataClient(siteDataSoap, xmlValidation))
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
+            .setActiveDirectoryClient(activeDirectoryClient.orElse(null))
             .build();
     siteConnectors.putIfAbsent(web, siteConnector);
     siteConnector = siteConnectors.get(web);
