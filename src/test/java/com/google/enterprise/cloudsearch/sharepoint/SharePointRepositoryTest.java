@@ -2,8 +2,11 @@ package com.google.enterprise.cloudsearch.sharepoint;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.hamcrest.CoreMatchers.hasItem;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -18,9 +21,16 @@ import com.google.api.client.http.ByteArrayContent;
 import com.google.api.client.util.DateTime;
 import com.google.api.services.cloudsearch.v1.model.Item;
 import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
+import com.google.api.services.cloudsearch.v1.model.NamedProperty;
+import com.google.api.services.cloudsearch.v1.model.ObjectDefinition;
 import com.google.api.services.cloudsearch.v1.model.Principal;
+import com.google.api.services.cloudsearch.v1.model.PropertyDefinition;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
+import com.google.api.services.cloudsearch.v1.model.Schema;
+import com.google.api.services.cloudsearch.v1.model.TextPropertyOptions;
+import com.google.api.services.cloudsearch.v1.model.TextValues;
 import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
 import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterable;
@@ -38,6 +48,8 @@ import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
+import com.google.enterprise.cloudsearch.sdk.indexing.StructuredData;
+import com.google.enterprise.cloudsearch.sdk.indexing.StructuredData.ResetStructuredDataRule;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
@@ -85,6 +97,7 @@ public class SharePointRepositoryTest {
   @Rule public ExpectedException thrown = ExpectedException.none();
   @Rule public ResetConfigRule resetConfig = new ResetConfigRule();
   @Rule public SetupConfigRule setupConfig = SetupConfigRule.uninitialized();
+  @Rule public ResetStructuredDataRule resetStructuredData = new ResetStructuredDataRule();
 
   @Rule
   public CompareCheckpointCloseableIterableRule<ApiOperation> checkpointIterableRule =
@@ -115,6 +128,27 @@ public class SharePointRepositoryTest {
     when(siteConnectorFactoryBuilder.setActiveDirectoryClient(any()))
         .thenReturn(siteConnectorFactoryBuilder);
     when(siteConnectorFactoryBuilder.build()).thenReturn(siteConnectorFactory);
+    PropertyDefinition author =
+        new PropertyDefinition()
+            .setName("Author")
+            .setIsRepeatable(false)
+            .setTextPropertyOptions(new TextPropertyOptions());
+    PropertyDefinition multiValue =
+        new PropertyDefinition()
+            .setName("MultiValue")
+            .setIsRepeatable(true)
+            .setTextPropertyOptions(new TextPropertyOptions());
+    ObjectDefinition objectDefinition =
+        new ObjectDefinition()
+            .setName("Item")
+            .setPropertyDefinitions(ImmutableList.of(author, multiValue));
+    ObjectDefinition objectDefinitionAnother =
+        new ObjectDefinition()
+            .setName("AnotherContentType")
+            .setPropertyDefinitions(ImmutableList.of(author, multiValue));
+    StructuredData.init(
+        new Schema()
+            .setObjectDefinitions(ImmutableList.of(objectDefinition, objectDefinitionAnother)));
   }
 
   @Test
@@ -635,15 +669,9 @@ public class SharePointRepositoryTest {
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
+            .setObjectType("Item")
             .setItemType(ItemType.CONTAINER_ITEM);
 
-    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
-    ContentTemplate listItemContentTemplate =
-        new ContentTemplate.Builder()
-            .setTitle("Title")
-            .setLowContent(Arrays.asList("Modified", "Created", "Author", "Editor", "ContentType"))
-            .setUnmappedColumnMode(UnmappedColumnsMode.APPEND)
-            .build();
     Multimap<String, Object> values = ArrayListMultimap.create();
     values.put("Title", "Inside Folder");
     values.put("ContentType", "Item");
@@ -652,6 +680,16 @@ public class SharePointRepositoryTest {
     values.put("Author", "System Account");
     values.put("Editor", "System Account");
     values.putAll("MultiValue", Arrays.asList("alpha", "beta"));
+    itemBuilder.setValues(values);
+
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
+    ContentTemplate listItemContentTemplate =
+        new ContentTemplate.Builder()
+            .setTitle("Title")
+            .setLowContent(Arrays.asList("Modified", "Created", "Author", "Editor", "ContentType"))
+            .setUnmappedColumnMode(UnmappedColumnsMode.APPEND)
+            .build();
+
     String expectedContent = listItemContentTemplate.apply(values);
     expectedDoc.setContent(
         ByteArrayContent.fromString(null, expectedContent),
@@ -666,6 +704,306 @@ public class SharePointRepositoryTest {
     assertEquals(expected.getItem(), returnedDoc.getItem());
     assertEquals(expected.getContentFormat(), returnedDoc.getContentFormat());
     assertEquals(expected.getRequestMode(), returnedDoc.getRequestMode());
+    // Explicitly validating that values set with structured data are populated via
+    // IndexingItemBuilder.
+    assertThat(
+        returnedDoc.getItem().getStructuredData().getObject().getProperties(),
+        hasItem(
+            new NamedProperty()
+                .setName("Author")
+                .setTextValues(new TextValues().setValues(ImmutableList.of("System Account")))));
+    assertThat(
+        returnedDoc.getItem().getStructuredData().getObject().getProperties(),
+        hasItem(
+            new NamedProperty()
+                .setName("MultiValue")
+                .setTextValues(new TextValues().setValues(ImmutableList.of("alpha", "beta")))));
+  }
+
+  @Test
+  public void testGetListItemDocContentNormalizedContentType() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "http://localhost:1",
+        "http://localhost:1",
+        0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String listResponse =
+        SharePointResponseHelper.getListResponse()
+            .replaceAll("/sites/SiteCollection", "")
+            .replace(
+                "ScopeID=\"{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}\"",
+                "ScopeID=\"{2e29615c-59e7-493b-b08a-3642949cc069}\"");
+    setupList(listResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}");
+    SharePointObject payloadItem =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Custom List/2_.000")
+            .setObjectId("item")
+            .build();
+    setupUrlSegments(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}",
+        "2");
+    String listItemResponse = SharePointResponseHelper.getListItemResponse();
+    listItemResponse =
+        listItemResponse
+            .replaceAll("/Test Folder", "")
+            .replaceAll("/Test%20Folder", "")
+            .replaceAll("/sites/SiteCollection", "")
+            .replaceAll("sites/SiteCollection/", "")
+            .replaceAll("ows_Attachments='1'", "ows_Attachments='0'")
+            .replaceAll("ows_ContentType='Item'", "ows_ContentType='Another Content Type'");
+    setupListItem(listItemResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "2");
+
+    Item entry =
+        new Item()
+            .setName("http://localhost:1/Lists/Custom List/2_.000")
+            .encodePayload(payloadItem.encodePayload());
+    IndexingItemBuilder itemBuilder =
+        new IndexingItemBuilder("http://localhost:1/Lists/Custom List/2_.000")
+            .setAcl(
+                new Acl.Builder()
+                    .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
+                    .setInheritFrom("http://localhost:1/Lists/Custom List")
+                    .build())
+            .setUrl(
+                FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
+            .setContainer("http://localhost:1/Lists/Custom List")
+            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setPayload(payloadItem.encodePayload())
+            .setObjectType("AnotherContentType")
+            .setItemType(ItemType.CONTAINER_ITEM);
+
+    Multimap<String, Object> values = ArrayListMultimap.create();
+    values.put("Title", "Inside Folder");
+    values.put("ContentType", "Another Content Type");
+    values.put("Modified", "2012-05-04T21:24:32Z");
+    values.put("Created", "2012-05-01T22:14:06Z");
+    values.put("Author", "System Account");
+    values.put("Editor", "System Account");
+    values.putAll("MultiValue", Arrays.asList("alpha", "beta"));
+    itemBuilder.setValues(values);
+
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
+    RepositoryDoc expected = expectedDoc.build();
+    ApiOperation actual = repo.getDoc(entry);
+    RepositoryDoc returnedDoc = (RepositoryDoc) actual;
+    assertEquals(expected.getItem(), returnedDoc.getItem());
+    // Explicitly validating that values set with structured data are populated via
+    // IndexingItemBuilder.
+    assertThat(
+        returnedDoc.getItem().getStructuredData().getObject().getProperties(),
+        hasItem(
+            new NamedProperty()
+                .setName("Author")
+                .setTextValues(new TextValues().setValues(ImmutableList.of("System Account")))));
+    assertThat(
+        returnedDoc.getItem().getStructuredData().getObject().getProperties(),
+        hasItem(
+            new NamedProperty()
+                .setName("MultiValue")
+                .setTextValues(new TextValues().setValues(ImmutableList.of("alpha", "beta")))));
+  }
+
+  @Test
+  public void testGetListItemDocContentObjectTypeNotAvailable() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "http://localhost:1",
+        "http://localhost:1",
+        0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String listResponse =
+        SharePointResponseHelper.getListResponse()
+            .replaceAll("/sites/SiteCollection", "")
+            .replace(
+                "ScopeID=\"{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}\"",
+                "ScopeID=\"{2e29615c-59e7-493b-b08a-3642949cc069}\"");
+    setupList(listResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}");
+    SharePointObject payloadItem =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Custom List/2_.000")
+            .setObjectId("item")
+            .build();
+    setupUrlSegments(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}",
+        "2");
+    String listItemResponse = SharePointResponseHelper.getListItemResponse();
+    listItemResponse =
+        listItemResponse
+            .replaceAll("/Test Folder", "")
+            .replaceAll("/Test%20Folder", "")
+            .replaceAll("/sites/SiteCollection", "")
+            .replaceAll("sites/SiteCollection/", "")
+            .replaceAll("ows_Attachments='1'", "ows_Attachments='0'")
+            .replaceAll("ows_ContentType='Item'", "ows_ContentType='Something Else'");
+    setupListItem(listItemResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "2");
+
+    Item entry =
+        new Item()
+            .setName("http://localhost:1/Lists/Custom List/2_.000")
+            .encodePayload(payloadItem.encodePayload());
+    IndexingItemBuilder itemBuilder =
+        new IndexingItemBuilder("http://localhost:1/Lists/Custom List/2_.000")
+            .setAcl(
+                new Acl.Builder()
+                    .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
+                    .setInheritFrom("http://localhost:1/Lists/Custom List")
+                    .build())
+            .setUrl(
+                FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
+            .setContainer("http://localhost:1/Lists/Custom List")
+            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setPayload(payloadItem.encodePayload())
+            .setItemType(ItemType.CONTAINER_ITEM);
+
+    Multimap<String, Object> values = ArrayListMultimap.create();
+    values.put("Title", "Inside Folder");
+    values.put("ContentType", "Something Else");
+    values.put("Modified", "2012-05-04T21:24:32Z");
+    values.put("Created", "2012-05-01T22:14:06Z");
+    values.put("Author", "System Account");
+    values.put("Editor", "System Account");
+    values.putAll("MultiValue", Arrays.asList("alpha", "beta"));
+    itemBuilder.setValues(values);
+
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
+    RepositoryDoc expected = expectedDoc.build();
+    ApiOperation actual = repo.getDoc(entry);
+    RepositoryDoc returnedDoc = (RepositoryDoc) actual;
+    assertEquals(expected.getItem(), returnedDoc.getItem());
+    assertNull(returnedDoc.getItem().getStructuredData());
+  }
+
+  @Test
+  public void testGetListItemDocContentTypeNull() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "http://localhost:1",
+        "http://localhost:1",
+        0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String listResponse =
+        SharePointResponseHelper.getListResponse()
+            .replaceAll("/sites/SiteCollection", "")
+            .replace(
+                "ScopeID=\"{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}\"",
+                "ScopeID=\"{2e29615c-59e7-493b-b08a-3642949cc069}\"");
+    setupList(listResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}");
+    SharePointObject payloadItem =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Custom List/2_.000")
+            .setObjectId("item")
+            .build();
+    setupUrlSegments(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}",
+        "2");
+    String listItemResponse = SharePointResponseHelper.getListItemResponse();
+    listItemResponse =
+        listItemResponse
+            .replaceAll("/Test Folder", "")
+            .replaceAll("/Test%20Folder", "")
+            .replaceAll("/sites/SiteCollection", "")
+            .replaceAll("sites/SiteCollection/", "")
+            .replaceAll("ows_Attachments='1'", "ows_Attachments='0'")
+            .replaceAll("ows_ContentType='Item'", "");
+    setupListItem(listItemResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "2");
+
+    Item entry =
+        new Item()
+            .setName("http://localhost:1/Lists/Custom List/2_.000")
+            .encodePayload(payloadItem.encodePayload());
+    IndexingItemBuilder itemBuilder =
+        new IndexingItemBuilder("http://localhost:1/Lists/Custom List/2_.000")
+            .setAcl(
+                new Acl.Builder()
+                    .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
+                    .setInheritFrom("http://localhost:1/Lists/Custom List")
+                    .build())
+            .setUrl(
+                FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
+            .setContainer("http://localhost:1/Lists/Custom List")
+            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setPayload(payloadItem.encodePayload())
+            .setItemType(ItemType.CONTAINER_ITEM);
+
+    Multimap<String, Object> values = ArrayListMultimap.create();
+    values.put("Title", "Inside Folder");
+    values.put("Modified", "2012-05-04T21:24:32Z");
+    values.put("Created", "2012-05-01T22:14:06Z");
+    values.put("Author", "System Account");
+    values.put("Editor", "System Account");
+    values.putAll("MultiValue", Arrays.asList("alpha", "beta"));
+    itemBuilder.setValues(values);
+
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
+    RepositoryDoc expected = expectedDoc.build();
+    ApiOperation actual = repo.getDoc(entry);
+    RepositoryDoc returnedDoc = (RepositoryDoc) actual;
+    assertEquals(expected.getItem(), returnedDoc.getItem());
+    assertNull(returnedDoc.getItem().getStructuredData());
   }
 
   @Test

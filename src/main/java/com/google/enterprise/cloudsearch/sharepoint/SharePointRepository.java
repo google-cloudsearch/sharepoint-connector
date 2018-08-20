@@ -31,6 +31,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
+import com.google.enterprise.cloudsearch.sdk.indexing.StructuredData;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
@@ -147,6 +148,7 @@ public class SharePointRepository implements Repository {
   private static final String OWS_CONTENTTYPEID_ATTRIBUTE = "ows_ContentTypeId";
   /** As described at http://msdn.microsoft.com/en-us/library/aa543822.aspx . */
   private static final String CONTENTTYPEID_DOCUMENT_PREFIX = "0x0101";
+  private static final String OWS_CONTENTTYPE_ATTRIBUTE = "ows_ContentType";
 
   private static final Pattern METADATA_ESCAPE_PATTERN = Pattern.compile("_x([0-9a-f]{4})_");
   private static final Pattern ALTERNATIVE_VALUE_PATTERN = Pattern.compile("^\\d+;#");
@@ -1286,6 +1288,12 @@ public class SharePointRepository implements Repository {
       throw new AssertionError();
     }
     Multimap<String, Object> extractedMetadataValues = extractMetadataValues(row);
+    String contentType = row.getAttribute(OWS_CONTENTTYPE_ATTRIBUTE);
+    String objectType = contentType == null ? "" : getNormalizedObjectType(contentType);
+    if (!Strings.isNullOrEmpty(objectType) && StructuredData.hasObjectDefinition(objectType)) {
+      itemBuilder.setObjectType(objectType);
+    }
+    itemBuilder.setValues(extractedMetadataValues);
     if (isFolder) {
       itemBuilder.setItemType(ItemType.CONTAINER_ITEM);
       String root = scConnector.encodeDocId(l.getMetadata().getRootFolder());
@@ -1713,5 +1721,16 @@ public class SharePointRepository implements Repository {
       return url;
     }
     return url.substring(0, url.length() - 1);
+  }
+
+  /**
+   * Converts content type name to potential object definition name defined in structured data by
+   * removing non alphanumeric characters from content type name.
+   *
+   * @param contentType content type name to normalized.
+   * @return normalized objectType name to be used for applying structured data.
+   */
+  private static String getNormalizedObjectType(String contentType) {
+    return contentType.replaceAll("[^A-Za-z0-9]", "");
   }
 }
