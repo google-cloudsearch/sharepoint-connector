@@ -3,12 +3,15 @@ package com.google.enterprise.cloudsearch.sharepoint;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableMap;
+import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
 import com.microsoft.schemas.sharepoint.soap.SiteDataSoap;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -29,12 +32,18 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
   private final SharePointRequestContext requestContext;
   private final boolean xmlValidation;
   private final Optional<ActiveDirectoryClient> activeDirectoryClient;
+  private final ImmutableMap<String, IdentitySourceConfiguration>
+      referenceIdentitySourceConfiguration;
+  private final boolean stripDomainInUserPrincipals;
 
   private SiteConnectorFactoryImpl(Builder builder) {
     soapFactory = checkNotNull(builder.soapFactory);
     requestContext = checkNotNull(builder.requestContext);
     xmlValidation = builder.xmlValidation;
     activeDirectoryClient = checkNotNull(builder.activeDirectoryClient);
+    referenceIdentitySourceConfiguration =
+        checkNotNull(builder.referenceIdentitySourceConfiguration);
+    stripDomainInUserPrincipals = checkNotNull(builder.stripDomainInUserPrincipals);
   }
 
   @Override
@@ -61,6 +70,8 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
             .setActiveDirectoryClient(activeDirectoryClient.orElse(null))
+            .setReferenceIdentitySourceConfiguration(referenceIdentitySourceConfiguration)
+            .setStripDomainInUserPrincipals(stripDomainInUserPrincipals)
             .build();
     siteConnectors.putIfAbsent(web, siteConnector);
     siteConnector = siteConnectors.get(web);
@@ -133,6 +144,8 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
     private SharePointRequestContext requestContext;
     private boolean xmlValidation;
     private Optional<ActiveDirectoryClient> activeDirectoryClient;
+    private ImmutableMap<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration;
+    private boolean stripDomainInUserPrincipals;
 
     public Builder() {
       soapFactory = new SoapFactoryImpl();
@@ -157,6 +170,18 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
 
     public Builder setActiveDirectoryClient(Optional<ActiveDirectoryClient> activeDirectoryClient) {
       this.activeDirectoryClient = activeDirectoryClient;
+      return this;
+    }
+
+    Builder setReferenceIdentitySourceConfiguration(
+        Map<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration) {
+      this.referenceIdentitySourceConfiguration =
+          ImmutableMap.copyOf(referenceIdentitySourceConfiguration);
+      return this;
+    }
+
+    Builder setStripDomainInUserPrincipals(boolean stripDomainInUserPrincipals) {
+      this.stripDomainInUserPrincipals = stripDomainInUserPrincipals;
       return this;
     }
 

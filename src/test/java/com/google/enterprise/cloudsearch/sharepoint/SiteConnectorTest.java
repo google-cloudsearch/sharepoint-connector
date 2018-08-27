@@ -14,8 +14,10 @@ import com.google.api.services.cloudidentity.v1beta1.model.Membership;
 import com.google.api.services.cloudidentity.v1beta1.model.MembershipRole;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.enterprise.cloudsearch.sdk.identity.IdentityGroup;
+import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
 import com.google.enterprise.cloudsearch.sdk.identity.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sharepoint.SiteConnector.SPBasePermissions;
@@ -145,8 +147,11 @@ public class SiteConnectorTest {
             .setSiteDataClient(siteDataClient)
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
+            .setReferenceIdentitySourceConfiguration(
+                ImmutableMap.of(
+                    "GDC-PSL", new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build()))
             .build();
-    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
+    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1", "idSourceGdcPsl");
     Principal teamSiteOwners =
         Acl.getGroupPrincipal(
             SiteConnector.encodeSharePointLocalGroupName(
@@ -222,19 +227,65 @@ public class SiteConnectorTest {
             .setSiteDataClient(siteDataClient)
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
+            .setReferenceIdentitySourceConfiguration(
+                ImmutableMap.of(
+                    "GDC-PSL",
+                    new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build(),
+                    "gdc-psl.com",
+                    new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build()))
             .build();
-    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
+    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1", "idSourceGdcPsl");
     Principal teamSiteOwners =
         Acl.getGroupPrincipal(
             SiteConnector.encodeSharePointLocalGroupName(
                 "http://localhost:1/sites/SiteCollection", "TeamSite Owners"));
-    Principal admin = Acl.getUserPrincipal("GDC-PSL\\administrator");
-    Principal group300 = Acl.getGroupPrincipal("group300@gdc-psl.com");
+    Principal admin = Acl.getUserPrincipal("GDC-PSL\\administrator", "idSourceGdcPsl");
+    Principal group300 = Acl.getGroupPrincipal("group300@gdc-psl.com", "idSourceGdcPsl");
     assertEquals(Arrays.asList(spUser1, teamSiteOwners, admin, group300), sc.getListAcl(list));
   }
 
   @Test
   public void testScopeAcls() throws IOException {
+    // GDC_PSL\\spuser1
+    Permission permSpUser1 = createPermission(2, SiteConnector.LIST_ITEM_MASK);
+    Permission notEnough = createPermission(100, SPBasePermissions.EMPTYMASK);
+    // TeamSite Owners
+    Permission permLocalGroup = createPermission(3, SPBasePermissions.FULLMASK);
+    // GSA-CONNECTORS\\User1
+    Permission domainNotMapped = createPermission(14, SiteConnector.LIST_ITEM_MASK);
+    // Group with no domain roleprovider:super
+    Permission groupNoDomain = createPermission(19, SiteConnector.LIST_ITEM_MASK);
+    Scope scope = new Scope();
+    scope
+        .getPermission()
+        .addAll(
+            Arrays.asList(permSpUser1, notEnough, permLocalGroup, domainNotMapped, groupNoDomain));
+    setupGetContentSite(loadTestResponse("sites-SiteCollection-sc.xml"));
+    SiteConnector sc =
+        new SiteConnector.Builder(
+                "http://localhost:1/sites/SiteCollection",
+                "http://localhost:1/sites/SiteCollection")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .setReferenceIdentitySourceConfiguration(
+                ImmutableMap.of(
+                    "GDC-PSL",
+                    new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build(),
+                    SiteConnector.DEFAULT_REFERENCE_IDENTITY_SOURCE_NAME,
+                    new IdentitySourceConfiguration.Builder("idSourceDefault").build()))
+            .build();
+    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1", "idSourceGdcPsl");
+    Principal teamSiteOwners =
+        Acl.getGroupPrincipal("[http://localhost:1/sites/SiteCollection]TeamSite Owners");
+    Principal principalGroupNoDomain =
+        Acl.getGroupPrincipal("roleprovider:super", "idSourceDefault");
+    assertEquals(
+        Arrays.asList(spUser1, teamSiteOwners, principalGroupNoDomain), sc.getScopeAcl(scope));
+  }
+
+  @Test
+  public void testScopeAclsStripDomain() throws IOException {
     // GDC_PSL\\spuser1
     Permission permSpUser1 = createPermission(2, SiteConnector.LIST_ITEM_MASK);
     Permission notEnough = createPermission(100, SPBasePermissions.EMPTYMASK);
@@ -250,8 +301,12 @@ public class SiteConnectorTest {
             .setSiteDataClient(siteDataClient)
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
+            .setStripDomainInUserPrincipals(true)
+            .setReferenceIdentitySourceConfiguration(
+                ImmutableMap.of(
+                    "GDC-PSL", new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build()))
             .build();
-    Principal spUser1 = Acl.getUserPrincipal("GDC-PSL\\spuser1");
+    Principal spUser1 = Acl.getUserPrincipal("spuser1", "idSourceGdcPsl");
     Principal teamSiteOwners =
         Acl.getGroupPrincipal("[http://localhost:1/sites/SiteCollection]TeamSite Owners");
     assertEquals(Arrays.asList(spUser1, teamSiteOwners), sc.getScopeAcl(scope));
@@ -266,6 +321,9 @@ public class SiteConnectorTest {
             .setSiteDataClient(siteDataClient)
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
+            .setReferenceIdentitySourceConfiguration(
+                ImmutableMap.of(
+                    "DOMAIN", new IdentitySourceConfiguration.Builder("idSourceDOMAIN").build()))
             .build();
     AtomicInteger userIds = new AtomicInteger();
     UserDescription user1 = createUser(userIds.incrementAndGet(), "DOMAIN\\user1Admin", "User1");
@@ -284,8 +342,8 @@ public class SiteConnectorTest {
     web.getUsers().getUser().addAll(Arrays.asList(user1, group1, userRegular, userInvalidLogin));
     List<Principal> expected =
         Arrays.asList(
-            Acl.getUserPrincipal("DOMAIN\\user1Admin"),
-            Acl.getGroupPrincipal("DOMAIN\\group1Admin"));
+            Acl.getUserPrincipal("DOMAIN\\user1Admin", "idSourceDOMAIN"),
+            Acl.getGroupPrincipal("DOMAIN\\group1Admin", "idSourceDOMAIN"));
     assertEquals(expected, sc.getSiteCollectionAdmins(web));
   }
 
@@ -371,19 +429,27 @@ public class SiteConnectorTest {
         .addAll(Arrays.asList(localServiceInfo, spUser1Info, adminInfo, unknownInfo));
     when(peopleSoap.resolvePrincipals(any(ArrayOfString.class), eq(SPPrincipalType.ALL), eq(false)))
         .thenReturn(resolveInfo);
+    ImmutableMap<String, IdentitySourceConfiguration> referenceIdentitySources =
+        new ImmutableMap.Builder<String, IdentitySourceConfiguration>()
+            .put("NT AUTHORITY", new IdentitySourceConfiguration.Builder("idSourceNT").build())
+            .put("GDC-PSL", new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build())
+            .build();
     SiteConnector sc =
         new SiteConnector.Builder("http://sp.com", "http://sp.com")
             .setSiteDataClient(siteDataClient)
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
+            .setReferenceIdentitySourceConfiguration(referenceIdentitySources)
             .build();
     Acl expected =
         new Acl.Builder()
-            .setDeniedReaders(Collections.singletonList(Acl.getUserPrincipal("GDC-PSL\\spuser1")))
+            .setDeniedReaders(
+                Collections.singletonList(
+                    Acl.getUserPrincipal("GDC-PSL\\spuser1", "idSourceGdcPsl")))
             .setReaders(
                 Arrays.asList(
-                    Acl.getGroupPrincipal("NT AUTHORITY\\LOCAL SERVICE"),
-                    Acl.getUserPrincipal("GDC-PSL\\Administrator")))
+                    Acl.getGroupPrincipal("NT AUTHORITY\\LOCAL SERVICE", "idSourceNT"),
+                    Acl.getUserPrincipal("GDC-PSL\\Administrator", "idSourceGdcPsl")))
             .build();
     assertEquals(expected, sc.getWebApplicationPolicyAcl(vs));
   }

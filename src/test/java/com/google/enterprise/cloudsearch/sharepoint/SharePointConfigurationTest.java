@@ -2,9 +2,11 @@ package com.google.enterprise.cloudsearch.sharepoint;
 
 import static org.junit.Assert.assertEquals;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration.ResetConfigRule;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration.SetupConfigRule;
+import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import org.junit.Rule;
@@ -109,6 +111,8 @@ public class SharePointConfigurationTest {
     baseConfiguration.put("sharepoint.userAgent", "agent");
     baseConfiguration.put("sharepoint.webservices.socketTimeoutSecs", "50");
     baseConfiguration.put("sharepoint.webservices.readTimeOutSecs", "120");
+    baseConfiguration.put("api.referenceIdentitySources", "GDC-PSL");
+    baseConfiguration.put("api.referenceIdentitySource.GDC-PSL.id", "idSourceGdcPsl");
     setupConfig.initConfig(baseConfiguration);
     SharePointConfiguration configuration = SharePointConfiguration.fromConfiguration();
     assertEquals(true, configuration.isPerformBrowserLeniency());
@@ -123,6 +127,10 @@ public class SharePointConfigurationTest {
     assertEquals(
         TimeUnit.MILLISECONDS.convert(120, TimeUnit.SECONDS),
         configuration.getWebservicesReadTimeoutMills());
+    assertEquals(
+        ImmutableMap.of(
+            "GDC-PSL", new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build()),
+        configuration.getReferenceIdentitySourceConfiguration());
   }
 
   private Properties getBaseConfiguration() {

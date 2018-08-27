@@ -59,6 +59,8 @@ public class SharePointIdentityRepositoryTest {
     when(siteConnectorFactoryBuilder.setActiveDirectoryClient(any()))
         .thenReturn(siteConnectorFactoryBuilder);
     when(siteConnectorFactoryBuilder.build()).thenReturn(siteConnectorFactory);
+    when(siteConnectorFactoryBuilder.setReferenceIdentitySourceConfiguration(any()))
+        .thenReturn(siteConnectorFactoryBuilder);
   }
 
   @Test

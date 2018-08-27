@@ -100,6 +100,8 @@ class SharePointIdentityRepository implements Repository {
             .setRequestContext(requestContext)
             .setXmlValidation(sharepointConfiguration.isPerformXmlValidation())
             .setActiveDirectoryClient(ActiveDirectoryClient.fromConfiguration())
+            .setReferenceIdentitySourceConfiguration(
+                sharepointConfiguration.getReferenceIdentitySourceConfiguration())
             .build();
   }
 

@@ -11,10 +11,13 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.enterprise.cloudsearch.sdk.identity.IdentityGroup;
+import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
 import com.google.enterprise.cloudsearch.sdk.identity.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
+import com.google.enterprise.cloudsearch.sharepoint.ActiveDirectoryPrincipal.PrincipalFormat;
 import com.microsoft.schemas.sharepoint.soap.GroupMembership;
 import com.microsoft.schemas.sharepoint.soap.Permission;
 import com.microsoft.schemas.sharepoint.soap.PolicyUser;
@@ -56,6 +59,8 @@ class SiteConnector {
       ImmutableList.of(new MembershipRole().setName("MEMBER"));
   static final long LIST_ITEM_MASK =
       SPBasePermissions.OPEN | SPBasePermissions.VIEWPAGES | SPBasePermissions.VIEWLISTITEMS;
+  /** Default identity source for external principals when no domain information is available */
+  static final String DEFAULT_REFERENCE_IDENTITY_SOURCE_NAME = "defaultIdentitySource";
 
   private final SiteDataClient siteDataClient;
   private final UserGroupSoap userGroup;
@@ -75,6 +80,11 @@ class SiteConnector {
    */
   private final Object refreshSiteUserMappingLock = new Object();
 
+  private final ImmutableMap<String, IdentitySourceConfiguration>
+      referenceIdentitySourceConfiguration;
+  private final Optional<IdentitySourceConfiguration> defaultIdentitySourceConfiguration;
+  private final boolean stripDomainInUserPrincipals;
+
   private SiteConnector(Builder builder) {
     this.siteDataClient = builder.siteDataClient;
     this.userGroup = builder.userGroup;
@@ -82,6 +92,12 @@ class SiteConnector {
     this.siteUrl = builder.siteUrl;
     this.webUrl = builder.webUrl;
     this.activeDirectoryClient = Optional.ofNullable(builder.activeDirectoryClient);
+    this.referenceIdentitySourceConfiguration = builder.referenceIdentitySourceConfiguration;
+    // TODO(tvartak) Make default identity source name configurable.
+    this.defaultIdentitySourceConfiguration =
+        Optional.ofNullable(
+            referenceIdentitySourceConfiguration.get(DEFAULT_REFERENCE_IDENTITY_SOURCE_NAME));
+    this.stripDomainInUserPrincipals = builder.stripDomainInUserPrincipals;
   }
 
   SiteDataClient getSiteDataClient() {
@@ -150,11 +166,9 @@ class SiteConnector {
         continue;
       }
       log.log(Level.FINER, "Policy User accountName = {0}", accountName);
-      Principal principal;
-      if (isGroup) {
-        principal = Acl.getGroupPrincipal(accountName);
-      } else {
-        principal = Acl.getUserPrincipal(accountName);
+      Principal principal = getPrincipal(accountName, isGroup).orElse(null);
+      if (principal == null) {
+        continue;
       }
       long grant = policyUser.getGrantMask().longValue();
       if ((necessaryPermissionMask & grant) == necessaryPermissionMask) {
@@ -446,10 +460,10 @@ class SiteConnector {
             user.getID());
         continue;
       }
-      if (isDomainGroup) {
-        map.put((int) user.getID(), Acl.getGroupPrincipal(userName));
-      } else {
-        map.put((int) user.getID(), Acl.getUserPrincipal(userName));
+
+      Principal principal = getPrincipal(userName, isDomainGroup).orElse(null);
+      if (principal != null) {
+        map.put((int) user.getID(), principal);
       }
     }
     mapping = new MemberIdMapping(map);
@@ -508,11 +522,7 @@ class SiteConnector {
     if (userName == null) {
       return null;
     }
-    if (isDomainGroup) {
-      return Acl.getGroupPrincipal(userName);
-    } else {
-      return Acl.getUserPrincipal(userName);
-    }
+    return getPrincipal(userName, isDomainGroup).orElse(null);
   }
 
   private String getLoginNameForPrincipal(
@@ -535,6 +545,46 @@ class SiteConnector {
       }
     }
     return decodeClaim(loginName, displayName);
+  }
+
+  private Optional<Principal> getPrincipal(String id, boolean isGroup) {
+    ActiveDirectoryPrincipal adPrincipal = ActiveDirectoryPrincipal.parse(id);
+    if (adPrincipal.getFormat() == PrincipalFormat.NONE) {
+      if (defaultIdentitySourceConfiguration.isPresent()) {
+        if (isGroup) {
+          return Optional.of(Acl.getGroupPrincipal(
+              id, defaultIdentitySourceConfiguration.get().getIdentitySourceId()));
+        } else {
+          return Optional.of(Acl.getUserPrincipal(
+              id, defaultIdentitySourceConfiguration.get().getIdentitySourceId()));
+        }
+      } else {
+        log.log(
+            Level.WARNING,
+            "No default identity source configuration available. Returning empty for principal {0}",
+            id);
+       return Optional.empty();
+      }
+    }
+    String domain = adPrincipal.getDomain();
+    IdentitySourceConfiguration identitySource = referenceIdentitySourceConfiguration.get(domain);
+    if (identitySource == null) {
+      log.log(
+          Level.WARNING,
+          "No identity source configuration available for domain {0}. "
+              + "Returning empty for principal {1}",
+          new Object[] {domain, id});
+      return Optional.empty();
+    }
+    if (isGroup) {
+      return Optional.of(Acl.getGroupPrincipal(id, identitySource.getIdentitySourceId()));
+    } else {
+      String userId =
+          stripDomainInUserPrincipals
+              ? adPrincipal.getPrincipalNameInFormat(PrincipalFormat.NONE)
+              : id;
+      return Optional.of(Acl.getUserPrincipal(userId, identitySource.getIdentitySourceId()));
+    }
   }
 
   @VisibleForTesting
@@ -586,6 +636,9 @@ class SiteConnector {
     private String siteUrl;
     private String webUrl;
     private ActiveDirectoryClient activeDirectoryClient;
+    private ImmutableMap<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration =
+        ImmutableMap.of();
+    private boolean stripDomainInUserPrincipals;
 
     Builder(String siteUrl, String webUrl) {
       this.siteUrl = siteUrl;
@@ -609,6 +662,18 @@ class SiteConnector {
 
     Builder setActiveDirectoryClient(ActiveDirectoryClient activeDirectoryClient) {
       this.activeDirectoryClient = activeDirectoryClient;
+      return this;
+    }
+
+    Builder setReferenceIdentitySourceConfiguration(
+        Map<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration) {
+      this.referenceIdentitySourceConfiguration =
+          ImmutableMap.copyOf(referenceIdentitySourceConfiguration);
+      return this;
+    }
+
+    Builder setStripDomainInUserPrincipals(boolean stripDomainInUserPrincipals) {
+      this.stripDomainInUserPrincipals = stripDomainInUserPrincipals;
       return this;
     }
 

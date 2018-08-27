@@ -5,11 +5,14 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
+import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
 import java.net.URISyntaxException;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -28,6 +31,9 @@ class SharePointConfiguration {
   private final int webservicesReadTimeoutMills;
   private final boolean performXmlValidation;
   private final boolean performBrowserLeniency;
+  private final ImmutableMap<String, IdentitySourceConfiguration>
+      referenceIdentitySourceConfiguration;
+  private final boolean stripDomainInUserPrincipals;
 
   private static boolean isCredentialOptional() {
     return System.getProperty("os.name", "").contains("Windows");
@@ -67,6 +73,9 @@ class SharePointConfiguration {
     this.webservicesReadTimeoutMills = builder.webservicesReadTimeoutMills;
     this.performXmlValidation = builder.performXmlValidation;
     this.performBrowserLeniency = builder.performBrowserLeniency;
+    this.referenceIdentitySourceConfiguration =
+        checkNotNull(builder.referenceIdentitySourceConfiguration);
+    this.stripDomainInUserPrincipals = builder.stripDomainInUserPrincipals;
   }
 
   @Override
@@ -88,7 +97,10 @@ class SharePointConfiguration {
         && Objects.equals(webservicesSocketTimeoutMills, that.webservicesSocketTimeoutMills)
         && Objects.equals(webservicesReadTimeoutMills, that.webservicesReadTimeoutMills)
         && Objects.equals(performXmlValidation, that.performXmlValidation)
-        && Objects.equals(performBrowserLeniency, that.performBrowserLeniency);
+        && Objects.equals(performBrowserLeniency, that.performBrowserLeniency)
+        && Objects.equals(
+            referenceIdentitySourceConfiguration, that.referenceIdentitySourceConfiguration)
+        && Objects.equals(stripDomainInUserPrincipals, that.stripDomainInUserPrincipals);
   }
 
   @Override
@@ -104,7 +116,9 @@ class SharePointConfiguration {
         webservicesSocketTimeoutMills,
         webservicesReadTimeoutMills,
         performXmlValidation,
-        performBrowserLeniency);
+        performBrowserLeniency,
+        referenceIdentitySourceConfiguration,
+        stripDomainInUserPrincipals);
   }
 
   boolean isSiteCollectionUrl() {
@@ -147,6 +161,14 @@ class SharePointConfiguration {
     return performBrowserLeniency;
   }
 
+  boolean isStripDomainInUserPrincipals() {
+    return stripDomainInUserPrincipals;
+  }
+
+  ImmutableMap<String, IdentitySourceConfiguration> getReferenceIdentitySourceConfiguration() {
+    return referenceIdentitySourceConfiguration;
+  }
+
   @Override
   public String toString() {
     return "SharePointConfiguration [sharePointUrl="
@@ -170,6 +192,10 @@ class SharePointConfiguration {
         + performXmlValidation
         + ", performBrowserLeniency="
         + performBrowserLeniency
+        + ", referenceIdentitySourceConfiguration="
+        + referenceIdentitySourceConfiguration
+        + ", stripDomainInUserPrincipals="
+        + stripDomainInUserPrincipals
         + "]";
   }
 
@@ -184,6 +210,8 @@ class SharePointConfiguration {
     private int webservicesReadTimeoutMills = 180 * 1000;
     private boolean performXmlValidation = false;
     private boolean performBrowserLeniency = true;
+    private ImmutableMap<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration;
+    private boolean stripDomainInUserPrincipals;
 
     Builder(SharePointUrl sharePointUrl) {
       this.sharePointUrl = sharePointUrl;
@@ -234,6 +262,18 @@ class SharePointConfiguration {
       return this;
     }
 
+    Builder setReferenceIdentitySourceConfiguration(
+        Map<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration) {
+      this.referenceIdentitySourceConfiguration =
+          ImmutableMap.copyOf(referenceIdentitySourceConfiguration);
+      return this;
+    }
+
+    Builder setStripDomainInUserPrincipals(boolean stripDomainInUserPrincipals) {
+      this.stripDomainInUserPrincipals = stripDomainInUserPrincipals;
+      return this;
+    }
+
     SharePointConfiguration build() throws URISyntaxException {
       if ((sharePointUrl == null)
           || (sharePointSiteCollectionOnly == null)
@@ -269,6 +309,8 @@ class SharePointConfiguration {
     int readTimeOutMillis =
         Configuration.getInteger("sharepoint.webservices.readTimeOutSecs", 180).get() * 1000;
     boolean xmlValidation = Configuration.getBoolean("sharepoint.xmlValidation", false).get();
+    boolean stripDomainInUserPrincipals =
+        Configuration.getBoolean("sharepoint.stripDomainInUserPrincipals", false).get();
     try {
       return new Builder(sharepointUrl)
           .setUserName(username)
@@ -279,6 +321,9 @@ class SharePointConfiguration {
           .setWebservicesReadTimeoutMills(readTimeOutMillis)
           .setPerformXmlValidation(xmlValidation)
           .setPerformBrowserLeniency(performBrowserLeniency)
+          .setStripDomainInUserPrincipals(stripDomainInUserPrincipals)
+          .setReferenceIdentitySourceConfiguration(
+              IdentitySourceConfiguration.getReferenceIdentitySourcesFromConfiguration())
           .build();
     } catch (Exception e) {
       throw new InvalidConfigurationException("Invalid SharePoint Configuration", e);

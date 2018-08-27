@@ -31,6 +31,7 @@ import com.google.api.services.cloudsearch.v1.model.TextPropertyOptions;
 import com.google.api.services.cloudsearch.v1.model.TextValues;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
 import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterable;
@@ -40,6 +41,7 @@ import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.RepositoryException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration.ResetConfigRule;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration.SetupConfigRule;
+import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
@@ -128,6 +130,10 @@ public class SharePointRepositoryTest {
     when(siteConnectorFactoryBuilder.setActiveDirectoryClient(any()))
         .thenReturn(siteConnectorFactoryBuilder);
     when(siteConnectorFactoryBuilder.build()).thenReturn(siteConnectorFactory);
+    when(siteConnectorFactoryBuilder.setReferenceIdentitySourceConfiguration(any()))
+        .thenReturn(siteConnectorFactoryBuilder);
+    when(siteConnectorFactoryBuilder.setStripDomainInUserPrincipals(false))
+        .thenReturn(siteConnectorFactoryBuilder);
     PropertyDefinition author =
         new PropertyDefinition()
             .setName("Author")
@@ -189,6 +195,8 @@ public class SharePointRepositoryTest {
     inOrder.verify(siteConnectorFactoryBuilder).setRequestContext(requestContext);
     inOrder.verify(siteConnectorFactoryBuilder).setXmlValidation(false);
     inOrder.verify(siteConnectorFactoryBuilder).setActiveDirectoryClient(Optional.empty());
+    inOrder.verify(siteConnectorFactoryBuilder).setReferenceIdentitySourceConfiguration(any());
+    inOrder.verify(siteConnectorFactoryBuilder).setStripDomainInUserPrincipals(false);
     inOrder.verify(siteConnectorFactoryBuilder).build();
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
   }
@@ -217,6 +225,9 @@ public class SharePointRepositoryTest {
     properties.put("sharepoint.xmlValidation", "true");
     when(siteConnectorFactoryBuilder.setXmlValidation(true))
         .thenReturn(siteConnectorFactoryBuilder);
+    properties.put("sharepoint.stripDomainInUserPrincipals", "true");
+    when(siteConnectorFactoryBuilder.setStripDomainInUserPrincipals(true))
+        .thenReturn(siteConnectorFactoryBuilder);
     properties.put("sharepoint.userAgent", "custom-user-agent");
     overrideConfig(properties);
     setupVirtualServerForInit();
@@ -236,6 +247,8 @@ public class SharePointRepositoryTest {
     inOrder.verify(siteConnectorFactoryBuilder).setRequestContext(requestContext);
     inOrder.verify(siteConnectorFactoryBuilder).setXmlValidation(true);
     inOrder.verify(siteConnectorFactoryBuilder).setActiveDirectoryClient(Optional.empty());
+    inOrder.verify(siteConnectorFactoryBuilder).setReferenceIdentitySourceConfiguration(any());
+    inOrder.verify(siteConnectorFactoryBuilder).setStripDomainInUserPrincipals(true);
     inOrder.verify(siteConnectorFactoryBuilder).build();
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
   }
@@ -375,6 +388,9 @@ public class SharePointRepositoryTest {
             .setSiteDataClient(siteDataClient)
             .setPeople(peopleSoap)
             .setUserGroup(userGroupSoap)
+            .setReferenceIdentitySourceConfiguration(
+                ImmutableMap.of(
+                    "GDC-PSL", new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build()))
             .build();
     when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
         .thenReturn(scRoot);
@@ -407,8 +423,8 @@ public class SharePointRepositoryTest {
             .build();
     List<Principal> admins =
         Arrays.asList(
-            Acl.getUserPrincipal("GDC-PSL\\administrator"),
-            Acl.getUserPrincipal("GDC-PSL\\spuser1"));
+            Acl.getUserPrincipal("GDC-PSL\\administrator", "idSourceGdcPsl"),
+            Acl.getUserPrincipal("GDC-PSL\\spuser1", "idSourceGdcPsl"));
     Acl adminAcl =
         new Acl.Builder()
             .setReaders(admins)
@@ -1540,6 +1556,8 @@ public class SharePointRepositoryTest {
         "contentTemplate.sharepointItem.quality.low",
         "Modified,Created,Author,Editor,ContentType,MultiValue");
     properties.put("contentTemplate.sharepointItem.unmappedColumnsMode", "IGNORE");
+    properties.put("api.referenceIdentitySources", "GDC-PSL");
+    properties.put("api.referenceIdentitySource.GDC-PSL.id", "idSourceGdcPsl");
     return properties;
   }
 
@@ -1689,7 +1707,7 @@ public class SharePointRepositoryTest {
           .setInheritFrom(aclParent)
           .setReaders(
               Arrays.asList(
-                  Acl.getUserPrincipal("GDC-PSL\\spuser1"),
+                  Acl.getUserPrincipal("GDC-PSL\\spuser1", "idSourceGdcPsl"),
                   Acl.getGroupPrincipal(
                       SiteConnector.encodeSharePointLocalGroupName(
                           "http://localhost:1", "TeamSite Owners")),
