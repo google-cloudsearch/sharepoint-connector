@@ -84,7 +84,7 @@ public class AdfsHandshakeManagerTest {
   public void testNullEndpoint() {
     thrown.expect(NullPointerException.class);
     new AdfsHandshakeManager.Builder(
-        null, "username", "password","https://sts", "realm").build();
+        null, "username", "password", "https://sts", "realm").build();
   }
 
   @Test
@@ -216,12 +216,13 @@ public class AdfsHandshakeManagerTest {
     assertEquals("FedAuth=AutheCookie;", cookie);
 
     String expectedSubmitTokenRequest = "wa=wsignin1.0&wctx="
-      + URLEncoder.encode("https://sharepoint.intranet.com/_layouts/"
-          + "Authenticate.aspx","UTF-8")
-      + "&wresult=" + URLEncoder.encode("<t:RequestSecurityTokenResponse "
-          + "xmlns:t=\"http://schemas.xmlsoap.org/ws/2005/02/trust\">"
-          + "This is requested token"
-          + "</t:RequestSecurityTokenResponse>", "UTF-8");
+        + URLEncoder.encode(
+            "https://sharepoint.intranet.com/_layouts/Authenticate.aspx", "UTF-8")
+        + "&wresult="
+        + URLEncoder.encode("<t:RequestSecurityTokenResponse "
+            + "xmlns:t=\"http://schemas.xmlsoap.org/ws/2005/02/trust\">"
+            + "This is requested token"
+            + "</t:RequestSecurityTokenResponse>", "UTF-8");
     assertEquals(expectedSubmitTokenRequest,
         postClient.receivedRequestBodyMap.get(submitToken));
   }

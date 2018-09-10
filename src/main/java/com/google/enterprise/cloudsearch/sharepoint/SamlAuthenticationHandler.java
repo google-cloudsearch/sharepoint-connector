@@ -124,7 +124,7 @@ class SamlAuthenticationHandler extends FormsAuthenticationHandler {
         connection.setRequestMethod("POST");
         connection.setInstanceFollowRedirects(false);
 
-        for(String key : connectionProperties.keySet()) {
+        for (String key : connectionProperties.keySet()) {
           connection.addRequestProperty(key, connectionProperties.get(key));
         }
 
@@ -186,7 +186,7 @@ class SamlAuthenticationHandler extends FormsAuthenticationHandler {
         return null;
       }
       StringBuilder sbValues = new StringBuilder();
-      for(String value : headers.get(header)) {
+      for (String value : headers.get(header)) {
         if ("".equals(value)) {
           continue;
         }

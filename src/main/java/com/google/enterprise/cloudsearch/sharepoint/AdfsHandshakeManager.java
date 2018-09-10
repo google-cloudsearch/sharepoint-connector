@@ -67,7 +67,7 @@ class AdfsHandshakeManager implements SamlHandshakeManager {
   protected final String stsrealm;
   protected final HttpPostClient httpClient;
   protected final String trustLocation;
-  private static final String reqXML
+  private static final String REQUEST_XML
       = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
       + "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\" "
       + "xmlns:a=\"http://www.w3.org/2005/08/addressing\" "
@@ -170,7 +170,7 @@ class AdfsHandshakeManager implements SamlHandshakeManager {
   public String getAuthenticationCookie(String token) throws IOException {
     URL u = new URL(trustLocation);
     String param = "wa=wsignin1.0"
-        + "&wctx=" + URLEncoder.encode(login,"UTF-8")
+        + "&wctx=" + URLEncoder.encode(login, "UTF-8")
         + "&wresult=" + URLEncoder.encode(token, "UTF-8");
 
     Map<String, String> requestHeaders = new HashMap<String, String>();
@@ -182,7 +182,7 @@ class AdfsHandshakeManager implements SamlHandshakeManager {
   }
 
   private String generateSamlRequest() {
-    return String.format(reqXML, escapeCdata(stsendpoint),
+    return String.format(REQUEST_XML, escapeCdata(stsendpoint),
         escapeCdata(username), escapeCdata(password), escapeCdata(stsrealm));
   }
 

@@ -56,8 +56,8 @@ class FileInfo {
         return false;
       }
       FileHeader that = (FileHeader) o;
-      return Objects.equals(header, that.header) &&
-          Objects.equals(value, that.value);
+      return Objects.equals(header, that.header)
+          && Objects.equals(value, that.value);
     }
 
     @Override

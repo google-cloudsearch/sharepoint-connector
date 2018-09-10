@@ -132,8 +132,7 @@ public class SharePointFormsAuthenticationHandlerTest {
         = new SharePointFormsAuthenticationHandler.Builder("username",
             "password", new UnsupportedScheduledExecutor(),
             new MockFormsAuthenticationSoap(){
-                @Override public AuthenticationMode mode()
-                {
+                @Override public AuthenticationMode mode() {
                   return AuthenticationMode.WINDOWS;
                 }
             }).build();

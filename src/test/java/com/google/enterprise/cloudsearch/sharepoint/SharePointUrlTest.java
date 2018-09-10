@@ -34,7 +34,8 @@ public class SharePointUrlTest {
   }
 
   @Test
-  public void testBuilderNonBrowserLeniencyQueryParam() throws URISyntaxException, MalformedURLException {
+  public void testBuilderNonBrowserLeniencyQueryParam()
+      throws URISyntaxException, MalformedURLException {
     String docUrl = "http://sp.com/shared documents?param=value";
     SharePointUrl url = new SharePointUrl.Builder(docUrl).setPerformBrowserLeniency(false).build();
     assertEquals(new URI("http://sp.com/shared%20documents%3Fparam=value"), url.getURI());
@@ -57,7 +58,8 @@ public class SharePointUrlTest {
   }
 
   @Test
-  public void testBuilderBrowserLeniencyTrailingSlash() throws URISyntaxException, MalformedURLException {
+  public void testBuilderBrowserLeniencyTrailingSlash()
+      throws URISyntaxException, MalformedURLException {
     String docUrl = "https://sp.google.com/shared documents/folder/";
     SharePointUrl url = new SharePointUrl.Builder(docUrl).setPerformBrowserLeniency(true).build();
     assertEquals(new URI("https://sp.google.com/shared%20documents/folder"), url.getURI());

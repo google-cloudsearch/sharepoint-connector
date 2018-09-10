@@ -36,7 +36,7 @@ public class SharePointRequestContextTest {
           .put(SharePointRequestContext.INTERNAL_WS_REQUEST_TIMEOUT, 180000)
           .put(SharePointRequestContext.WS_REQUEST_TIMEOUT, 180000)
           .build();
-  static Map<String, List<String>> DEFAULT_AUTH_HEADER =
+  static final Map<String, List<String>> DEFAULT_AUTH_HEADER =
       new ImmutableMap.Builder<String, List<String>>()
           .put(
               SharePointRequestContext.HEADER_X_FORMS_BASED_AUTH_ACCEPTED,

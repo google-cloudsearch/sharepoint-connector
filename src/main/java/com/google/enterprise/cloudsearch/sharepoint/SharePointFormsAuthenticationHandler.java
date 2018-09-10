@@ -104,7 +104,7 @@ class SharePointFormsAuthenticationHandler extends FormsAuthenticationHandler {
         = (Map<String, Object>) ((BindingProvider) authenticationClient)
         .getResponseContext().get(MessageContext.HTTP_RESPONSE_HEADERS);
     log.log(Level.FINEST, "Response headers: {0}", responseHeaders);
-    if(!responseHeaders.containsKey("Set-cookie")) {
+    if (!responseHeaders.containsKey("Set-cookie")) {
       throw new IOException("Unable to extract authentication cookie.");
     }
 

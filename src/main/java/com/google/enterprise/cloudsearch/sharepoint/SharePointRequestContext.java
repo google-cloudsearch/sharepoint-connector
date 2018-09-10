@@ -111,11 +111,11 @@ class SharePointRequestContext {
       return false;
     }
     SharePointRequestContext that = (SharePointRequestContext) o;
-    return socketTimeoutMillis == that.socketTimeoutMillis &&
-        readTimeoutMillis == that.readTimeoutMillis &&
-        Objects.equals(authenticationHandler, that.authenticationHandler) &&
-        Objects.equals(userAgent, that.userAgent) &&
-        Objects.equals(timeoutConfiguration, that.timeoutConfiguration);
+    return socketTimeoutMillis == that.socketTimeoutMillis
+        && readTimeoutMillis == that.readTimeoutMillis
+        && Objects.equals(authenticationHandler, that.authenticationHandler)
+        && Objects.equals(userAgent, that.userAgent)
+        && Objects.equals(timeoutConfiguration, that.timeoutConfiguration);
   }
 
   @Override

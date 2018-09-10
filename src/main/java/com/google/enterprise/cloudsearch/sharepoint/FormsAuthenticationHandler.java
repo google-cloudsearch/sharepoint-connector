@@ -115,7 +115,7 @@ abstract class FormsAuthenticationHandler {
     public void run() {
       try {
         refreshCookies();
-      } catch(IOException ex) {
+      } catch (IOException ex) {
         log.log(Level.WARNING,
             "Error refreshing forms authentication cookies", ex);
         executor.schedule(this, 5, TimeUnit.MINUTES);

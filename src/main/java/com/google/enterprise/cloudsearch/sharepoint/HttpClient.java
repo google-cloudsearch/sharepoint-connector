@@ -2,7 +2,6 @@ package com.google.enterprise.cloudsearch.sharepoint;
 
 import java.io.IOException;
 import java.net.URL;
-import java.util.List;
 
 interface HttpClient {
   /**
