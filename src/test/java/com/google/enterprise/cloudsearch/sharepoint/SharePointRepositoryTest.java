@@ -1225,7 +1225,7 @@ public class SharePointRepositoryTest {
         new SharePointObject.Builder(SharePointObject.LIST_ITEM)
             .setListId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
             .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
-            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{b2ea1067-3a54-4ab7-a459-c8ec864b97eb}")
             .setUrl("http://localhost:1/Lists/Announcements/2_.000")
             .setObjectId("item")
             .build();
@@ -1296,7 +1296,7 @@ public class SharePointRepositoryTest {
         new SharePointObject.Builder(SharePointObject.LIST_ITEM)
             .setListId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
             .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
-            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{b2ea1067-3a54-4ab7-a459-c8ec864b97eb}")
             .setUrl("http://localhost:1/Lists/Announcements/2_.000")
             .setObjectId("item")
             .build();
@@ -1430,7 +1430,7 @@ public class SharePointRepositoryTest {
         new SharePointObject.Builder(SharePointObject.LIST_ITEM)
             .setListId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
             .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
-            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{b2ea1067-3a54-4ab7-a459-c8ec864b97eb}")
             .setUrl("http://localhost:1/Lists/Announcements/2_.000")
             .setObjectId("item")
             .build();
@@ -1502,7 +1502,7 @@ public class SharePointRepositoryTest {
         new SharePointObject.Builder(SharePointObject.LIST_ITEM)
             .setListId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
             .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
-            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{b2ea1067-3a54-4ab7-a459-c8ec864b97eb}")
             .setUrl("http://localhost:1/Lists/Announcements/2_.000")
             .setObjectId("item")
             .build();

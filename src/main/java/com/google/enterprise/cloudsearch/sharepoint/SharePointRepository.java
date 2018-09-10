@@ -13,6 +13,7 @@ import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
@@ -45,20 +46,17 @@ import com.google.enterprise.cloudsearch.sharepoint.SiteDataClient.Paginator;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.ContentDatabases;
 import com.microsoft.schemas.sharepoint.soap.ItemData;
-import com.microsoft.schemas.sharepoint.soap.ListMetadata;
 import com.microsoft.schemas.sharepoint.soap.Lists;
 import com.microsoft.schemas.sharepoint.soap.SPContentDatabase;
 import com.microsoft.schemas.sharepoint.soap.SPList;
 import com.microsoft.schemas.sharepoint.soap.SPListItem;
 import com.microsoft.schemas.sharepoint.soap.SPSite;
-import com.microsoft.schemas.sharepoint.soap.SPSiteMetadata;
 import com.microsoft.schemas.sharepoint.soap.SPWeb;
 import com.microsoft.schemas.sharepoint.soap.Scopes;
 import com.microsoft.schemas.sharepoint.soap.Site;
 import com.microsoft.schemas.sharepoint.soap.Sites;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
-import com.microsoft.schemas.sharepoint.soap.WebMetadata;
 import com.microsoft.schemas.sharepoint.soap.Webs;
 import com.microsoft.schemas.sharepoint.soap.Xml;
 import java.io.IOException;
@@ -426,7 +424,7 @@ public class SharePointRepository implements Repository {
       PushItems.Builder modifiedItems = new PushItems.Builder();
       SPSite change;
       while ((change = changes.next()) != null) {
-        getModifiedDocIdsSite(scConnector, change, modifiedItems);
+        getModifiedDocIdsSite(change, modifiedItems);
         changeToken = changes.getCursor();
       }
       SharePointIncrementalCheckpoint updatedCheckpoint =
@@ -459,7 +457,7 @@ public class SharePointRepository implements Repository {
     PushItems.Builder modifiedItems = new PushItems.Builder();
     SPSite change;
     while ((change = changes.next()) != null) {
-      getModifiedDocIdsSite(scConnector, change, modifiedItems);
+      getModifiedDocIdsSite(change, modifiedItems);
       changeToken = changes.getCursor();
     }
     SharePointIncrementalCheckpoint updatedCheckpoint =
@@ -473,22 +471,17 @@ public class SharePointRepository implements Repository {
         .build();
   }
 
-  private void getModifiedDocIdsSite(
-      SiteConnector scConnector, SPSite changes, PushItems.Builder pushItems) throws IOException {
-    SPSite.Site site = changes.getSite();
-    if (Objects.isNull(site)) {
-      return;
-    }
-    SPSiteMetadata metadata = site.getMetadata();
-    String encodedDocId = scConnector.encodeDocId(getCanonicalUrl(metadata.getURL()));
-    SharePointObject siteCollection =
-        new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
-            .setUrl(encodedDocId)
-            .setObjectId(metadata.getID())
-            .setSiteId(metadata.getID())
-            .setWebId(metadata.getID())
-            .build();
+  private void getModifiedDocIdsSite(SPSite changes, PushItems.Builder pushItems)
+      throws IOException {
     if (isModified(changes.getChange())) {
+      String encodedDocId = getCanonicalUrl(changes.getServerUrl() + changes.getDisplayUrl());
+      SharePointObject siteCollection =
+          new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+              .setUrl(encodedDocId)
+              .setObjectId(changes.getId())
+              .setSiteId(changes.getId())
+              .setWebId(changes.getId())
+              .build();
       pushItems.addPushItem(
           encodedDocId,
           new PushItem().encodePayload(siteCollection.encodePayload()).setType(PUSH_TYPE_MODIFIED));
@@ -498,31 +491,21 @@ public class SharePointRepository implements Repository {
       return;
     }
     for (SPWeb web : changedWebs) {
-      getModifiedDocIdsWeb(siteCollection, web, pushItems);
+      getModifiedDocIdsWeb(web, pushItems);
     }
   }
 
-  private void getModifiedDocIdsWeb(
-      SharePointObject parentObject,
-      SPWeb changes,
-      PushItems.Builder pushItems)
-      throws IOException {
-    SPWeb.Web web = changes.getWeb();
-    if (Objects.isNull(web)) {
-      return;
-    }
-    WebMetadata metadata = web.getMetadata();
-    String sharepointUrl = getCanonicalUrl(metadata.getURL());
-    SiteConnector webConnector = getSiteConnector(parentObject.getUrl(), sharepointUrl);
-    String encodedDocId = webConnector.encodeDocId(sharepointUrl);
-    SharePointObject payload =
-        new SharePointObject.Builder(SharePointObject.WEB)
-            .setSiteId(parentObject.getSiteId())
-            .setWebId(metadata.getID())
-            .setUrl(encodedDocId)
-            .setObjectId(metadata.getID())
-            .build();
+  private void getModifiedDocIdsWeb(SPWeb changes, PushItems.Builder pushItems) throws IOException {
     if (isModified(changes.getChange())) {
+      InternalUrl internalUrl = new InternalUrl(changes.getInternalUrl());
+      String encodedDocId = getCanonicalUrl(changes.getServerUrl() + changes.getDisplayUrl());
+      SharePointObject payload =
+          new SharePointObject.Builder(SharePointObject.WEB)
+              .setSiteId(internalUrl.siteId.get())
+              .setWebId(changes.getId())
+              .setUrl(encodedDocId)
+              .setObjectId(changes.getId())
+              .build();
       pushItems.addPushItem(
           encodedDocId,
           new PushItem().encodePayload(payload.encodePayload()).setType(PUSH_TYPE_MODIFIED));
@@ -534,35 +517,36 @@ public class SharePointRepository implements Repository {
     }
     for (Object choice : spObjects) {
       if (choice instanceof SPList) {
-        getModifiedDocIdsList(webConnector, parentObject, (SPList) choice, pushItems);
+        getModifiedDocIdsList((SPList) choice, pushItems);
       }
     }
   }
 
   private void getModifiedDocIdsList(
-      SiteConnector webConnector,
-      SharePointObject parentObject,
       SPList changes,
       PushItems.Builder pushItems)
       throws IOException {
-    com.microsoft.schemas.sharepoint.soap.List list = changes.getList();
-    if (Objects.isNull(list)) {
-      return;
-    }
-    ListMetadata metadata = list.getMetadata();
-    String encodedDocId = webConnector.encodeDocId(metadata.getDefaultViewUrl());
-    SharePointObject payload =
-        new SharePointObject.Builder(SharePointObject.LIST)
-            .setSiteId(parentObject.getSiteId())
-            .setWebId(parentObject.getWebId())
-            .setUrl(encodedDocId)
-            .setListId(metadata.getID())
-            .setObjectId(metadata.getID())
-            .build();
     if (isModified(changes.getChange())) {
-      pushItems.addPushItem(
-          encodedDocId,
-          new PushItem().encodePayload(payload.encodePayload()).setType(PUSH_TYPE_MODIFIED));
+      InternalUrl internalUrl = new InternalUrl(changes.getInternalUrl());
+      if (!internalUrl.siteId.isPresent() || !internalUrl.webId.isPresent()) {
+        log.log(
+            Level.WARNING,
+            "Unable to extract identifiers from internal url {0}",
+            changes.getInternalUrl());
+      } else {
+        String encodedDocId = getCanonicalUrl(changes.getServerUrl() + changes.getDisplayUrl());
+        SharePointObject payload =
+            new SharePointObject.Builder(SharePointObject.LIST)
+                .setSiteId(internalUrl.siteId.get())
+                .setWebId(internalUrl.webId.get())
+                .setUrl(encodedDocId)
+                .setListId(changes.getId())
+                .setObjectId(changes.getId())
+                .build();
+        pushItems.addPushItem(
+            encodedDocId,
+            new PushItem().encodePayload(payload.encodePayload()).setType(PUSH_TYPE_MODIFIED));
+      }
     }
     List<Object> spObjects = changes.getSPViewOrSPListItem();
     if (spObjects == null) {
@@ -572,14 +556,12 @@ public class SharePointRepository implements Repository {
       // Ignore view change detection.
 
       if (choice instanceof SPListItem) {
-        getModifiedDocIdsListItem(webConnector, payload, (SPListItem) choice, pushItems);
+        getModifiedDocIdsListItem((SPListItem) choice, pushItems);
       }
     }
   }
 
   private void getModifiedDocIdsListItem(
-      SiteConnector webConnector,
-      SharePointObject parentObject,
       SPListItem changes,
       PushItems.Builder pushItems)
       throws IOException {
@@ -588,6 +570,21 @@ public class SharePointRepository implements Repository {
       if (listItem == null) {
         return;
       }
+      if (Strings.isNullOrEmpty(changes.getInternalUrl())) {
+        log.log(Level.WARNING, "Unexpected list item change as internal url is missing.");
+        return;
+      }
+      InternalUrl internalUrl = new InternalUrl(changes.getInternalUrl());
+      if (!internalUrl.siteId.isPresent()
+          || !internalUrl.webId.isPresent()
+          || !internalUrl.listId.isPresent()) {
+        log.log(
+            Level.WARNING,
+            "Unable to extract identifiers from internal url {0}",
+            changes.getInternalUrl());
+        return;
+      }
+
       Object oData = listItem.getAny();
       if (!(oData instanceof Element)) {
         log.log(Level.WARNING, "Unexpected object type for data: {0}", oData.getClass());
@@ -597,15 +594,15 @@ public class SharePointRepository implements Repository {
         if (serverUrl == null) {
           log.log(
               Level.WARNING,
-              "Could not find server url attribute for " + "list item {0}",
+              "Could not find server url attribute for list item {0}",
               changes.getId());
         } else {
-          String encodedDocId = webConnector.encodeDocId(getCanonicalUrl(serverUrl));
+          String encodedDocId = getCanonicalUrl(changes.getServerUrl() + serverUrl);
           SharePointObject payload =
               new SharePointObject.Builder(SharePointObject.LIST_ITEM)
-                  .setListId(parentObject.getListId())
-                  .setSiteId(parentObject.getSiteId())
-                  .setWebId(parentObject.getWebId())
+                  .setListId(internalUrl.listId.get())
+                  .setSiteId(internalUrl.siteId.get())
+                  .setWebId(internalUrl.webId.get())
                   .setUrl(encodedDocId)
                   .setObjectId("item")
                   .build();
@@ -694,20 +691,7 @@ public class SharePointRepository implements Repository {
       }
 
       for (SPSite site : changedSites) {
-        SPSite.Site changedSite = site.getSite();
-        if (changedSite == null) {
-          continue;
-        }
-        SPSiteMetadata metadata = changedSite.getMetadata();
-        SiteConnector siteConnector;
-        String canonicalUrl = getCanonicalUrl(metadata.getURL());
-        try {
-          siteConnector = getConnectorForDocId(canonicalUrl);
-        } catch (URISyntaxException e) {
-          throw new IOException(
-              "Error creating SiteConnector for URL : " + canonicalUrl, e);
-        }
-        getModifiedDocIdsSite(siteConnector, site, modifiedItems);
+        getModifiedDocIdsSite(site, modifiedItems);
       }
       changeToken = changesContentDatabase.getCursor();
     }
@@ -1735,5 +1719,37 @@ public class SharePointRepository implements Repository {
    */
   private static String getNormalizedObjectType(String contentType) {
     return contentType.replaceAll("[^A-Za-z0-9]", "");
+  }
+
+  private static class InternalUrl {
+    private static final Splitter INTERNAL_URL_SPLITTER = Splitter.on('/');
+    private final Optional<String> siteId;
+    private final Optional<String> webId;
+    private final Optional<String> listId;
+
+    private InternalUrl(String url) {
+      List<String> parts = INTERNAL_URL_SPLITTER.splitToList(url);
+      siteId = getIdFromInternalUrlParts(parts, "siteid=");
+      webId = getIdFromInternalUrlParts(parts, "webid=");
+      listId = getIdFromInternalUrlParts(parts, "listid=");
+    }
+
+    /**
+     * Extracts Ids for specified prefix. Note : InternalUrl is expected in format similar to
+     * "/siteurl=/siteid={bb3bb2dd-6ea7-471b-a361-6fb67988755c}/weburl=/
+     * webid={b2ea1067-3a54-4ab7-a459-c8ec864b97eb}/
+     * listid={133fcb96-7e9b-46c9-b5f3-09770a35ad8a}/folderurl=/itemid=2"
+     *
+     * @param parts internal URL split by "/"
+     * @param idPrefix prefix to lookup.
+     * @return optional identifier if available.
+     */
+    private static Optional<String> getIdFromInternalUrlParts(List<String> parts, String idPrefix) {
+      return parts
+          .stream()
+          .filter(s -> s.startsWith(idPrefix))
+          .map(s -> s.substring(idPrefix.length()))
+          .findFirst();
+    }
   }
 }
