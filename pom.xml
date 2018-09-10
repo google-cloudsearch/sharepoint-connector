@@ -3,11 +3,11 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.google.enterprise.cloud.search</groupId>
-  <artifactId>google-cloud-search-sharepoint-connector</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
+  <artifactId>google-cloudsearch-sharepoint-connector</artifactId>
+  <version>v1-0.0.2</version>
   <packaging>jar</packaging>
 
-  <name>google-cloud-search-sharepoint-connector</name>
+  <name>google-cloudsearch-sharepoint-connector</name>
   <url>http://maven.apache.org</url>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
