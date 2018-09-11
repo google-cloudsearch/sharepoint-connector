@@ -69,8 +69,10 @@ import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -344,7 +346,7 @@ public class SharePointRepositoryTest {
     Item rootItem =
         new IndexingItemBuilder(SharePointRepository.VIRTUAL_SERVER_ID)
             .setAcl(policyAcl)
-            .setItemType(ItemType.CONTAINER_ITEM)
+            .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM)
             .setPayload(rootServerPayload.encodePayload())
             .build();
     SharePointObject siteCollectionPayload =
@@ -440,15 +442,14 @@ public class SharePointRepositoryTest {
     operations.add(new RepositoryDoc.Builder().setItem(siteAdminFragment).build());
     Map<String, PushItem> childEntries = getChildEntriesForWeb("http://localhost:1");
 
-    RepositoryDoc.Builder expectedDoc =
-        new RepositoryDoc.Builder()
-            .setItem(
-                getWebItem(
-                        "http://localhost:1",
-                        SharePointRepository.VIRTUAL_SERVER_ID,
-                        siteAdminFragmentId,
-                        false)
-                    .encodePayload(siteCollectionPayload.encodePayload()));
+    Item webItem = getWebItem(
+            "http://localhost:1",
+            SharePointRepository.VIRTUAL_SERVER_ID,
+            siteAdminFragmentId,
+            false);
+    webItem.getMetadata().setTitle("chinese1");
+    webItem.encodePayload(siteCollectionPayload.encodePayload());
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(webItem);
     childEntries.entrySet().stream().forEach(e -> expectedDoc.addChildId(e.getKey(), e.getValue()));
     operations.add(expectedDoc.build());
     ApiOperation expected = ApiOperations.batch(operations.iterator());
@@ -501,15 +502,14 @@ public class SharePointRepositoryTest {
     Item entry =
         new Item().setName("http://localhost:1/subsite").encodePayload(webPayload.encodePayload());
     Map<String, PushItem> childEntries = getChildEntriesForWeb("http://localhost:1/subsite");
-    RepositoryDoc.Builder expectedDoc =
-        new RepositoryDoc.Builder()
-            .setItem(
-                getWebItem(
-                        "http://localhost:1/subsite",
-                        "http://localhost:1",
-                        "http://localhost:1",
-                        true)
-                    .encodePayload(webPayload.encodePayload()));
+    Item webItem = getWebItem(
+            "http://localhost:1/subsite",
+            "http://localhost:1",
+            "http://localhost:1",
+            true);
+    webItem.getMetadata().setTitle("chinese1");
+    webItem.encodePayload(webPayload.encodePayload());
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(webItem);
     childEntries.entrySet().stream().forEach(e -> expectedDoc.addChildId(e.getKey(), e.getValue()));
     ApiOperation actual = repo.getDoc(entry);
     assertEquals(expectedDoc.build(), actual);
@@ -586,6 +586,7 @@ public class SharePointRepositoryTest {
                 "http://localhost:1",
                 true)
             .encodePayload(listRootPayload.encodePayload());
+    rootItem.setItemType(ItemType.VIRTUAL_CONTAINER_ITEM.name());
     RepositoryDoc expectedListRootDoc =
         new RepositoryDoc.Builder()
             .setItem(rootItem)
@@ -603,6 +604,7 @@ public class SharePointRepositoryTest {
             .setContainer("http://localhost:1/Lists/Custom List")
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setItemType(ItemType.CONTAINER_ITEM)
+            .setTitle(FieldOrValue.withValue("Custom List"))
             .setPayload(listPayload.encodePayload());
 
     RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
@@ -686,6 +688,7 @@ public class SharePointRepositoryTest {
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
             .setObjectType("Item")
+            .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
 
     Multimap<String, Object> values = ArrayListMultimap.create();
@@ -734,6 +737,95 @@ public class SharePointRepositoryTest {
             new NamedProperty()
                 .setName("MultiValue")
                 .setTextValues(new TextValues().setValues(ImmutableList.of("alpha", "beta")))));
+  }
+
+  @Test
+  public void testGetAttachmentDocContent() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf",
+        "http://localhost:1",
+        "http://localhost:1",
+        0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String listResponse =
+        SharePointResponseHelper.getListResponse()
+            .replaceAll("/sites/SiteCollection", "")
+            .replace(
+                "ScopeID=\"{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}\"",
+                "ScopeID=\"{2e29615c-59e7-493b-b08a-3642949cc069}\"");
+    setupList(listResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}");
+    SharePointObject payloadItem =
+        new SharePointObject.Builder(SharePointObject.ATTACHMENT)
+            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setItemId("http://localhost:1/Lists/Custom List/2_.000")
+            .setObjectId("http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf")
+            .setUrl("http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf")
+            .build();
+    setupUrlSegments(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}",
+        "2");
+    String listItemResponse = SharePointResponseHelper.getListItemResponse();
+    listItemResponse =
+        listItemResponse
+            .replaceAll("/Test Folder", "")
+            .replaceAll("/Test%20Folder", "")
+            .replaceAll("/sites/SiteCollection", "")
+            .replaceAll("sites/SiteCollection/", "");
+    setupListItem(listItemResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "2");
+    InputStream attachmentContent = new ByteArrayInputStream("attachment".getBytes());
+    when(httpClient.issueGetRequest(
+            new URL("http://localhost:1/Lists/Custom%20List/Attachments/2/attach.pdf")))
+        .thenReturn(new FileInfo.Builder(attachmentContent).build());
+
+    Item entry =
+        new Item()
+            .setName("http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf")
+            .encodePayload(payloadItem.encodePayload());
+    IndexingItemBuilder itemBuilder =
+        new IndexingItemBuilder("http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf")
+            .setAcl(
+                new Acl.Builder()
+                    .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
+                    .setInheritFrom("http://localhost:1/Lists/Custom List/2_.000")
+                    .build())
+            .setUrl(
+                FieldOrValue.withValue(
+                    "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf"))
+            .setContainer("http://localhost:1/Lists/Custom List/2_.000")
+            .setPayload(payloadItem.encodePayload())
+            .setItemType(ItemType.CONTENT_ITEM);
+
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
+    expectedDoc.setContent(ByteArrayContent.fromString(null, "attachment"), ContentFormat.RAW);
+    RepositoryDoc expected = expectedDoc.build();
+    ApiOperation actual = repo.getDoc(entry);
+    RepositoryDoc returnedDoc = (RepositoryDoc) actual;
+    try (InputStream inputStream = returnedDoc.getContent().getInputStream()) {
+      String actualContent = new String(ByteStreams.toByteArray(inputStream), UTF_8);
+      assertEquals("attachment", actualContent);
+    }
+    assertEquals(expected.getItem(), returnedDoc.getItem());
+    assertEquals(expected.getContentFormat(), returnedDoc.getContentFormat());
+    assertEquals(expected.getRequestMode(), returnedDoc.getRequestMode());
   }
 
   @Test
@@ -808,6 +900,7 @@ public class SharePointRepositoryTest {
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
             .setObjectType("AnotherContentType")
+            .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
 
     Multimap<String, Object> values = ArrayListMultimap.create();
@@ -912,6 +1005,7 @@ public class SharePointRepositoryTest {
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
+            .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
 
     Multimap<String, Object> values = ArrayListMultimap.create();
@@ -1003,6 +1097,7 @@ public class SharePointRepositoryTest {
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
+            .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
 
     Multimap<String, Object> values = ArrayListMultimap.create();

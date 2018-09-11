@@ -148,6 +148,8 @@ public class SharePointRepository implements Repository {
   private static final String CONTENTTYPEID_DOCUMENT_PREFIX = "0x0101";
   private static final String OWS_CONTENTTYPE_ATTRIBUTE = "ows_ContentType";
 
+  private static final String OWS_ITEM_TITLE = "ows_Title";
+
   private static final Pattern METADATA_ESCAPE_PATTERN = Pattern.compile("_x([0-9a-f]{4})_");
   private static final Pattern ALTERNATIVE_VALUE_PATTERN = Pattern.compile("^\\d+;#");
 
@@ -953,7 +955,7 @@ public class SharePointRepository implements Repository {
       IndexingItemBuilder itemBuilder =
           new IndexingItemBuilder(VIRTUAL_SERVER_ID)
               .setAcl(vsConnector.getWebApplicationPolicyAcl(vs))
-              .setItemType(ItemType.CONTAINER_ITEM)
+              .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM)
               .setPayload(item.decodePayload());
       RepositoryDoc.Builder docBuilder = new RepositoryDoc.Builder().setItem(itemBuilder.build());
       for (ContentDatabases.ContentDatabase cdcd : vs.getContentDatabases().getContentDatabase()) {
@@ -1017,7 +1019,8 @@ public class SharePointRepository implements Repository {
         siteAdmins
             .build()
             .createFragmentItemOf(polledItem.getName(), SITE_COLLECTION_ADMIN_FRAGMENT)
-            .encodePayload(siteAdminObject.encodePayload());
+            .encodePayload(siteAdminObject.encodePayload())
+            .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM.name());
     RepositoryDoc adminFragment = new RepositoryDoc.Builder().setItem(adminFragmentItem).build();
     batchRequest.add(adminFragment);
     IndexingItemBuilder item = new IndexingItemBuilder(polledItem.getName());
@@ -1033,6 +1036,7 @@ public class SharePointRepository implements Repository {
     item.setAcl(itemAcl);
     item.setItemType(ItemType.CONTAINER_ITEM);
     item.setPayload(polledItem.decodePayload());
+    item.setTitle(withValue(rootWeb.getMetadata().getTitle()));
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder().setItem(item.build());
     addChildIdsToRepositoryDoc(
         doc, getChildWebEntries(scConnector, site.getMetadata().getID(), rootWeb));
@@ -1063,6 +1067,7 @@ public class SharePointRepository implements Repository {
             .setAcl(aclBuilder.build())
             .setContainer(parentWebUrl)
             .setPayload(polledItem.decodePayload())
+            .setTitle(withValue(currentWeb.getMetadata().getTitle()))
             .setItemType(ItemType.CONTAINER_ITEM);
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder();
     addChildIdsToRepositoryDoc(
@@ -1094,7 +1099,7 @@ public class SharePointRepository implements Repository {
         new Item()
             .setName(rootFolderDocId)
             .setMetadata(new ItemMetadata().setContainerName(scConnector.getWebUrl()))
-            .setItemType(ItemType.CONTAINER_ITEM.name())
+            .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM.name())
             .encodePayload(rootFolderPayload.encodePayload());
 
     Web w = scConnector.getSiteDataClient().getContentWeb();
@@ -1138,6 +1143,7 @@ public class SharePointRepository implements Repository {
     } catch (ParseException ex) {
       log.log(Level.INFO, "Could not parse LastModified: {0}", lastModified);
     }
+    metadata.setTitle(l.getMetadata().getTitle());
     listItem.setMetadata(metadata);
     RepositoryDoc.Builder listDoc = new RepositoryDoc.Builder().setItem(listItem);
     addChildIdsToRepositoryDoc(
@@ -1189,6 +1195,7 @@ public class SharePointRepository implements Repository {
         log.log(Level.INFO, "Could not parse ows_Created: {0}", createdString);
       }
     }
+    itemBuilder.setTitle(withValue(row.getAttribute(OWS_ITEM_TITLE)));
     com.microsoft.schemas.sharepoint.soap.List l =
         scConnector.getSiteDataClient().getContentList(listId.value);
     // This should be in the form of "1234;#{GUID}". We want to extract the
@@ -1414,6 +1421,7 @@ public class SharePointRepository implements Repository {
     itemBuilder
         .setAcl(acl)
         .setPayload(polledItem.decodePayload())
+        .setContainer(itemObject.getItemId())
         .setItemType(ItemType.CONTENT_ITEM);
     return new RepositoryDoc.Builder()
         .setItem(itemBuilder.build())
