@@ -13,6 +13,7 @@ import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableMap;
@@ -760,7 +761,7 @@ public class SharePointRepository implements Repository {
       return new PushItems.Builder().addPushItem(item.getName(), notModified).build();
     } catch (IOException e) {
       throw buildRepositoryExceptionFromIOException(
-          String.format("error processing item %s", item), e);
+          String.format("error processing item %s", item.getName()), e);
     }
   }
 
@@ -990,7 +991,11 @@ public class SharePointRepository implements Repository {
 
   private static RepositoryException buildRepositoryExceptionFromIOException(
       String message, IOException e) {
-    return new RepositoryException.Builder().setErrorMessage(message).setCause(e).build();
+    String errorMessage = String.format("[%s]-%s", message, e.getMessage());
+    return new RepositoryException.Builder()
+        .setErrorMessage(Ascii.truncate(errorMessage, 1000, "..."))
+        .setCause(e)
+        .build();
   }
 
   private ApiOperation getSiteCollectionDocContent(
