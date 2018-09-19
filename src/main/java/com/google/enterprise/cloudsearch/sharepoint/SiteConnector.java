@@ -221,7 +221,7 @@ class SiteConnector {
   }
 
   /** Returns true if webUrl is a site collection. */
-  private boolean isWebSiteCollection() {
+  boolean isWebSiteCollection() {
     return siteUrl.equals(webUrl);
   }
 

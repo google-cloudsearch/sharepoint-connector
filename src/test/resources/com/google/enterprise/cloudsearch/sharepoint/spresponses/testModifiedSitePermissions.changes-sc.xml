@@ -1,0 +1,13 @@
+<SPSite Change="Unchanged" ItemCount="1">
+  <Messages />
+  <SPWeb Change="UpdateSecurity" ItemCount="0" UpdateSecurity="True"
+    Id="{eb1869b6-0258-4713-8298-f5412677da26}"
+    ParentId="{8a5b00a0-efcb-45d0-b282-f2d4dc746eeb}"
+    InternalUrl="/siteurl=/siteid={8a5b00a0-efcb-45d0-b282-f2d4dc746eeb}/weburl=/webid={eb1869b6-0258-4713-8298-f5412677da26}/"
+    DisplayUrl=""
+    ServerUrl="http://localhost:1" CRC="742474233"
+    SequenceNumber="2" SiteSubscriptionId="00000000-0000-0000-0000-000000000000">
+    <SPList Change="Unchanged" ItemCount="0">
+    </SPList>
+  </SPWeb>
+</SPSite>

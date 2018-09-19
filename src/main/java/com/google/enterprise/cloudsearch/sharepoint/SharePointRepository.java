@@ -502,8 +502,16 @@ public class SharePointRepository implements Repository {
     if (isModified(changes.getChange())) {
       InternalUrl internalUrl = new InternalUrl(changes.getInternalUrl());
       String encodedDocId = getCanonicalUrl(changes.getServerUrl() + changes.getDisplayUrl());
+      boolean isSiteCollection;
+      try {
+        SiteConnector siteConnector = getConnectorForDocId(encodedDocId);
+        isSiteCollection = siteConnector.isWebSiteCollection();
+      } catch (URISyntaxException e) {
+        throw new IOException(e);
+      }
       SharePointObject payload =
-          new SharePointObject.Builder(SharePointObject.WEB)
+          new SharePointObject.Builder(
+                  isSiteCollection ? SharePointObject.SITE_COLLECTION : SharePointObject.WEB)
               .setSiteId(internalUrl.siteId.get())
               .setWebId(changes.getId())
               .setUrl(encodedDocId)

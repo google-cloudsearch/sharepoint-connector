@@ -30,6 +30,10 @@ public class SharePointResponseHelper {
     return loadTestResponse("testModifiedGetDocIdsClient.changes-sc.xml");
   }
 
+  public static String getChangesSitePermissionsChange() {
+    return loadTestResponse("testModifiedSitePermissions.changes-sc.xml");
+  }
+
   public static String getChangesForcontentDB() {
     return loadTestResponse("testModifiedGetDocIdsClient.changes-cd.xml");
   }
