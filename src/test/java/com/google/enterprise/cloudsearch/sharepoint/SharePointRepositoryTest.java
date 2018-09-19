@@ -550,14 +550,6 @@ public class SharePointRepositoryTest {
         SharePointResponseHelper.getListRootFolderContentResponse()
             .replaceAll("/sites/SiteCollection", "");
     setupFolder(listRootFolderResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "");
-    SharePointObject listRootPayload =
-        new SharePointObject.Builder(SharePointObject.NAMED_RESOURCE)
-            .setUrl("http://localhost:1/Lists/Custom List")
-            .setObjectId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
-            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
-            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .build();
     SharePointObject listPayload =
         new SharePointObject.Builder(SharePointObject.LIST)
             .setUrl("http://localhost:1/Lists/Custom List/AllItems.aspx")
@@ -569,39 +561,18 @@ public class SharePointRepositoryTest {
 
     Item entry =
         new Item()
-            .setName("http://localhost:1/Lists/Custom List/AllItems.aspx")
+            .setName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
             .encodePayload(listPayload.encodePayload());
-    ItemMetadata metadata =
-        new ItemMetadata()
-            .setContainerName("http://localhost:1/Lists/Custom List")
-            .setSourceRepositoryUrl("http://localhost:1/Lists/Custom List/AllItems.aspx")
-            .setUpdateTime(null);
-    entry.setMetadata(metadata);
-    List<ApiOperation> expected = new ArrayList<>();
-
-    Item rootItem =
-        getWebItem(
-                "http://localhost:1/Lists/Custom List",
-                "http://localhost:1",
-                "http://localhost:1",
-                true)
-            .encodePayload(listRootPayload.encodePayload());
-    rootItem.setItemType(ItemType.VIRTUAL_CONTAINER_ITEM.name());
-    RepositoryDoc expectedListRootDoc =
-        new RepositoryDoc.Builder()
-            .setItem(rootItem)
-            .build();
-    expected.add(expectedListRootDoc);
 
     IndexingItemBuilder itemBuilder =
-        new IndexingItemBuilder("http://localhost:1/Lists/Custom List/AllItems.aspx")
+        new IndexingItemBuilder("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
             .setAcl(
                 new Acl.Builder()
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-                    .setInheritFrom("http://localhost:1/Lists/Custom List")
+                    .setInheritFrom("http://localhost:1")
                     .build())
             .setUrl(FieldOrValue.withValue("http://localhost:1/Lists/Custom List/AllItems.aspx"))
-            .setContainer("http://localhost:1/Lists/Custom List")
+            .setContainer("http://localhost:1")
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setItemType(ItemType.CONTAINER_ITEM)
             .setTitle(FieldOrValue.withValue("Custom List"))
@@ -612,9 +583,8 @@ public class SharePointRepositoryTest {
         .entrySet()
         .stream()
         .forEach(e -> expectedDoc.addChildId(e.getKey(), e.getValue()));
-    expected.add(expectedDoc.build());
-    ApiOperation actual = repo.getDoc(entry);
-    assertEquals(ApiOperations.batch(expected.iterator()), actual);
+    RepositoryDoc actual = (RepositoryDoc) repo.getDoc(entry);
+    assertEquals(expectedDoc.build(), actual);
   }
 
   @Test
@@ -672,18 +642,18 @@ public class SharePointRepositoryTest {
 
     Item entry =
         new Item()
-            .setName("http://localhost:1/Lists/Custom List/2_.000")
+            .setName("{E7156244-AC2F-4402-AA74-7A365726CD02}")
             .encodePayload(payloadItem.encodePayload());
     IndexingItemBuilder itemBuilder =
-        new IndexingItemBuilder("http://localhost:1/Lists/Custom List/2_.000")
+        new IndexingItemBuilder("{E7156244-AC2F-4402-AA74-7A365726CD02}")
             .setAcl(
                 new Acl.Builder()
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-                    .setInheritFrom("http://localhost:1/Lists/Custom List")
+                    .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
                     .build())
             .setUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainer("http://localhost:1/Lists/Custom List")
+            .setContainer("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
@@ -810,7 +780,7 @@ public class SharePointRepositoryTest {
             .setUrl(
                 FieldOrValue.withValue(
                     "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf"))
-            .setContainer("http://localhost:1/Lists/Custom List/2_.000")
+            .setContainer("{E7156244-AC2F-4402-AA74-7A365726CD02}")
             .setPayload(payloadItem.encodePayload())
             .setItemType(ItemType.CONTENT_ITEM);
 
@@ -891,11 +861,11 @@ public class SharePointRepositoryTest {
             .setAcl(
                 new Acl.Builder()
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-                    .setInheritFrom("http://localhost:1/Lists/Custom List")
+                    .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
                     .build())
             .setUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainer("http://localhost:1/Lists/Custom List")
+            .setContainer("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
@@ -997,11 +967,11 @@ public class SharePointRepositoryTest {
             .setAcl(
                 new Acl.Builder()
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-                    .setInheritFrom("http://localhost:1/Lists/Custom List")
+                    .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
                     .build())
             .setUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainer("http://localhost:1/Lists/Custom List")
+            .setContainer("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
@@ -1089,11 +1059,11 @@ public class SharePointRepositoryTest {
             .setAcl(
                 new Acl.Builder()
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-                    .setInheritFrom("http://localhost:1/Lists/Custom List")
+                    .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
                     .build())
             .setUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainer("http://localhost:1/Lists/Custom List")
+            .setContainer("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
             .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
@@ -1329,7 +1299,7 @@ public class SharePointRepositoryTest {
                 Collections.<ApiOperation>singleton(
                     new PushItems.Builder()
                         .addPushItem(
-                            "http://localhost:1/Lists/Announcements/2_.000",
+                            "{5085BE94-B5C1-45C8-A047-D0F03344FE31}",
                             new PushItem()
                                 .setType("MODIFIED")
                                 .encodePayload(listItemObject.encodePayload()))
@@ -1400,7 +1370,7 @@ public class SharePointRepositoryTest {
                 Collections.<ApiOperation>singleton(
                     new PushItems.Builder()
                         .addPushItem(
-                            "http://localhost:1/Lists/Announcements/2_.000",
+                            "{5085BE94-B5C1-45C8-A047-D0F03344FE31}",
                             new PushItem()
                                 .setType("MODIFIED")
                                 .encodePayload(listItemObject.encodePayload()))
@@ -1684,7 +1654,7 @@ public class SharePointRepositoryTest {
                 Collections.<ApiOperation>singleton(
                     new PushItems.Builder()
                         .addPushItem(
-                            "http://localhost:1/Lists/Announcements/2_.000",
+                            "{5085BE94-B5C1-45C8-A047-D0F03344FE31}",
                             new PushItem()
                                 .setType("MODIFIED")
                                 .encodePayload(listItemObject.encodePayload()))
@@ -1756,7 +1726,7 @@ public class SharePointRepositoryTest {
                 Collections.<ApiOperation>singleton(
                     new PushItems.Builder()
                         .addPushItem(
-                            "http://localhost:1/Lists/Announcements/2_.000",
+                            "{5085BE94-B5C1-45C8-A047-D0F03344FE31}",
                             new PushItem()
                                 .setType("MODIFIED")
                                 .encodePayload(listItemObject.encodePayload()))
@@ -1896,7 +1866,9 @@ public class SharePointRepositoryTest {
             .setUrl(annoucementUrl)
             .setObjectId("{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}")
             .build();
-    entries.put(annoucementUrl, new PushItem().encodePayload(payloadAnnoucement.encodePayload()));
+    entries.put(
+        "{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}",
+        new PushItem().encodePayload(payloadAnnoucement.encodePayload()));
     String sharedDocsUrl = webUrl + "/Shared Documents/Forms/AllItems.aspx";
     SharePointObject payloadSharedDoc =
         new SharePointObject.Builder(SharePointObject.LIST)
@@ -1906,7 +1878,9 @@ public class SharePointRepositoryTest {
             .setUrl(sharedDocsUrl)
             .setObjectId("{648f6636-3d90-4565-86b9-2dd7611fc855}")
             .build();
-    entries.put(sharedDocsUrl, new PushItem().encodePayload(payloadSharedDoc.encodePayload()));
+    entries.put(
+        "{648f6636-3d90-4565-86b9-2dd7611fc855}",
+        new PushItem().encodePayload(payloadSharedDoc.encodePayload()));
     return entries;
   }
 
@@ -1921,7 +1895,8 @@ public class SharePointRepositoryTest {
             .setObjectId("item")
             .build();
     entries.put(
-        listUrl + "/Test Folder", new PushItem().encodePayload(payloadFolder.encodePayload()));
+        "{CE33B6B7-9F5E-4224-8D77-9C42E6290FE6}",
+        new PushItem().encodePayload(payloadFolder.encodePayload()));
     SharePointObject payloadItem =
         new SharePointObject.Builder(SharePointObject.LIST_ITEM)
             .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
@@ -1930,7 +1905,9 @@ public class SharePointRepositoryTest {
             .setUrl(listUrl + "/3_.000")
             .setObjectId("item")
             .build();
-    entries.put(listUrl + "/3_.000", new PushItem().encodePayload(payloadItem.encodePayload()));
+    entries.put(
+        "{FD87F56D-DBE1-4EB1-8379-0B83082615E0}",
+        new PushItem().encodePayload(payloadItem.encodePayload()));
     return entries;
   }
 

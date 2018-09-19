@@ -9,7 +9,6 @@ import com.google.api.client.http.ByteArrayContent;
 import com.google.api.client.util.DateTime;
 import com.google.api.client.util.Strings;
 import com.google.api.services.cloudsearch.v1.model.Item;
-import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
 import com.google.common.annotations.VisibleForTesting;
@@ -70,7 +69,6 @@ import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -150,6 +148,7 @@ public class SharePointRepository implements Repository {
   private static final String OWS_CONTENTTYPE_ATTRIBUTE = "ows_ContentType";
 
   private static final String OWS_ITEM_TITLE = "ows_Title";
+  private static final String OWS_ITEM_OBJECT_ID = "ows_UniqueId";
 
   private static final Pattern METADATA_ESCAPE_PATTERN = Pattern.compile("_x([0-9a-f]{4})_");
   private static final Pattern ALTERNATIVE_VALUE_PATTERN = Pattern.compile("^\\d+;#");
@@ -242,6 +241,8 @@ public class SharePointRepository implements Repository {
           // Map .msg files to mime type application/vnd.ms-outlook
           .put(".msg", "application/vnd.ms-outlook")
           .build();
+
+  private static final Splitter ID_PREFIX_SPLITTER = Splitter.on(";#").limit(2);
 
   private final HttpClientImpl.Builder httpClientBuilder;
   private final SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
@@ -555,7 +556,7 @@ public class SharePointRepository implements Repository {
                 .setObjectId(changes.getId())
                 .build();
         pushItems.addPushItem(
-            encodedDocId,
+            changes.getId(),
             new PushItem().encodePayload(payload.encodePayload()).setType(PUSH_TYPE_MODIFIED));
       }
     }
@@ -618,14 +619,26 @@ public class SharePointRepository implements Repository {
                   .setObjectId("item")
                   .build();
           pushItems.addPushItem(
-              encodedDocId,
+              getUniqueIdFromRow(data),
               new PushItem().encodePayload(payload.encodePayload()).setType(PUSH_TYPE_MODIFIED));
         }
       }
     }
   }
 
-  private boolean isModified(String change) {
+  private static String getUniqueIdFromRow(Element data) {
+    return getValueFromIdPrefixedField(data, OWS_ITEM_OBJECT_ID);
+  }
+
+  private static final String getValueFromIdPrefixedField(Element data, String attribute) {
+    List<String> parts = ID_PREFIX_SPLITTER.splitToList(data.getAttribute(attribute));
+    if (parts.size() < 2) {
+      return "";
+    }
+    return parts.get(1);
+  }
+
+  private static boolean isModified(String change) {
     return !"Unchanged".equals(change) && !"Delete".equals(change);
   }
 
@@ -718,20 +731,22 @@ public class SharePointRepository implements Repository {
   public ApiOperation getDoc(Item item) throws RepositoryException {
     checkNotNull(item);
     try {
-      SharePointObject object = SharePointObject.parse(item.decodePayload());
-      String objectType = object.getObjectType();
-      if (!object.isValid()) {
+      SharePointObject payloadObject = SharePointObject.parse(item.decodePayload());
+      String objectType = payloadObject.getObjectType();
+      if (!payloadObject.isValid()) {
         log.log(
             Level.WARNING,
-            "Invalid SharePoint Objecct {0} on entry {1}",
-            new Object[] {object, item});
+            "Invalid SharePoint payload Object {0} on item {1}",
+            new Object[] {payloadObject, item});
         throw new RepositoryException.Builder().setErrorMessage("Invalid payload").build();
       }
 
       if (SharePointObject.NAMED_RESOURCE.equals(objectType)) {
         // Do not process named resource here.
         PushItem notModified =
-            new PushItem().setType(PUSH_TYPE_NOT_MODIFIED).encodePayload(object.encodePayload());
+            new PushItem()
+                .setType(PUSH_TYPE_NOT_MODIFIED)
+                .encodePayload(payloadObject.encodePayload());
         return new PushItems.Builder().addPushItem(item.getName(), notModified).build();
       }
 
@@ -739,9 +754,14 @@ public class SharePointRepository implements Repository {
         return getVirtualServerDocContent(item);
       }
 
+      String itemUrl =
+          SharePointObject.LIST_ITEM.equals(objectType) || SharePointObject.LIST.equals(objectType)
+              ? payloadObject.getUrl()
+              : item.getName();
+
       SiteConnector siteConnector;
       try {
-        siteConnector = getConnectorForDocId(item.getName());
+        siteConnector = getConnectorForDocId(itemUrl);
       } catch (URISyntaxException e) {
         throw new IOException(e);
       }
@@ -750,22 +770,22 @@ public class SharePointRepository implements Repository {
       }
 
       if (SharePointObject.SITE_COLLECTION.equals(objectType)) {
-        return getSiteCollectionDocContent(item, siteConnector, object);
+        return getSiteCollectionDocContent(item, siteConnector, payloadObject);
       }
       if (SharePointObject.WEB.equals(objectType)) {
-        return getWebDocContent(item, siteConnector, object);
+        return getWebDocContent(item, siteConnector, payloadObject);
       }
       if (SharePointObject.LIST.equals(objectType)) {
-        return getListDocContent(item, siteConnector, object);
+        return getListDocContent(item, siteConnector, payloadObject);
       }
       if (SharePointObject.LIST_ITEM.equals(objectType)) {
-        return getListItemDocContent(item, siteConnector, object);
+        return getListItemDocContent(item, siteConnector, payloadObject);
       }
       if (SharePointObject.ATTACHMENT.equals(objectType)) {
-        return getAttachmentDocContent(item, siteConnector, object);
+        return getAttachmentDocContent(item, siteConnector, payloadObject);
       }
       PushItem notModified =
-          new PushItem().setType(PUSH_TYPE_NOT_MODIFIED).encodePayload(object.encodePayload());
+          new PushItem().setType(PUSH_TYPE_NOT_MODIFIED).encodePayload(payloadObject.encodePayload());
       return new PushItems.Builder().addPushItem(item.getName(), notModified).build();
     } catch (IOException e) {
       throw buildRepositoryExceptionFromIOException(
@@ -1092,77 +1112,62 @@ public class SharePointRepository implements Repository {
 
   private ApiOperation getListDocContent(
       Item polledItem, SiteConnector scConnector, SharePointObject listObject) throws IOException {
-    com.microsoft.schemas.sharepoint.soap.List l =
-        scConnector.getSiteDataClient().getContentList(listObject.getListId());
-    String rootFolder = l.getMetadata().getRootFolder();
-    if (Strings.isNullOrEmpty(rootFolder)) {
-      return ApiOperations.deleteItem(polledItem.getName());
+    com.microsoft.schemas.sharepoint.soap.List l = null;
+    try {
+      l = scConnector.getSiteDataClient().getContentList(listObject.getListId());
+    } catch (IOException e) {
+      log.log(Level.WARNING, "Failed to lookup list for item " + listObject.getUrl(), e);
+      Holder<String> listId = new Holder<>();
+      Holder<String> itemId = new Holder<>();
+      scConnector.getSiteDataClient().getUrlSegments(listObject.getUrl(), listId, itemId);
+      if (listId.value == null) {
+        log.log(Level.INFO, "Deleting list {0} since list not found", polledItem.getName());
+        return ApiOperations.deleteItem(polledItem.getName());
+      } else {
+        // List is available but lookup failed.
+        throw new IOException("Failed to lookup list", e);
+      }
     }
-
-    String rootFolderDocId = scConnector.encodeDocId(rootFolder);
-    SharePointObject rootFolderPayload =
-        new SharePointObject.Builder(SharePointObject.NAMED_RESOURCE)
-            .setSiteId(listObject.getSiteId())
-            .setWebId(listObject.getWebId())
-            .setUrl(rootFolderDocId)
-            .setListId(listObject.getListId())
-            .setObjectId(listObject.getListId())
-            .build();
-    Item rootFolderItem =
-        new Item()
-            .setName(rootFolderDocId)
-            .setMetadata(new ItemMetadata().setContainerName(scConnector.getWebUrl()))
-            .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM.name())
-            .encodePayload(rootFolderPayload.encodePayload());
 
     Web w = scConnector.getSiteDataClient().getContentWeb();
     String scopeId = l.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
     String webScopeId = w.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
-    Acl.Builder rootFolderAcl =
-        new Acl.Builder().setInheritanceType(InheritanceType.PARENT_OVERRIDE);
+    Acl.Builder listAcl = new Acl.Builder().setInheritanceType(InheritanceType.PARENT_OVERRIDE);
     if (scopeId.equals(webScopeId)) {
-      rootFolderAcl.setInheritFrom(scConnector.getWebUrl());
+      listAcl.setInheritFrom(scConnector.getWebUrl());
     } else {
-      rootFolderAcl.setReaders(scConnector.getListAcl(l));
-      rootFolderAcl.setInheritFrom(scConnector.getSiteUrl(), SITE_COLLECTION_ADMIN_FRAGMENT);
+      listAcl.setReaders(scConnector.getListAcl(l));
+      listAcl.setInheritFrom(scConnector.getSiteUrl(), SITE_COLLECTION_ADMIN_FRAGMENT);
     }
-    rootFolderAcl.build().applyTo(rootFolderItem);
-    RepositoryDoc listRootDoc =
-        new RepositoryDoc.Builder()
-            .setItem(rootFolderItem)
-            .build();
-    ItemMetadata metadata = new ItemMetadata();
-    metadata.setContainerName(rootFolderDocId);
-    Item listItem =
-        new Item()
-            .setName(polledItem.getName())
-            .encodePayload(polledItem.decodePayload())
-            .setItemType(ItemType.CONTAINER_ITEM.name());
-    new Acl.Builder()
-        .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-        .setInheritFrom(rootFolderDocId)
-        .build()
-        .applyTo(listItem);
+
+    IndexingItemBuilder listItemBuilder =
+        new IndexingItemBuilder(polledItem.getName())
+            .setContainer(scConnector.getWebUrl())
+            .setAcl(listAcl.build())
+            .setItemType(ItemType.CONTAINER_ITEM)
+            .setPayload(listObject.encodePayload());
+
     String path =
         "/".equals(l.getMetadata().getDefaultViewUrl())
             ? l.getMetadata().getRootFolder()
             : l.getMetadata().getDefaultViewUrl();
     String displayUrl = scConnector.encodeDocId(path);
-    metadata.setSourceRepositoryUrl(displayUrl);
+    listItemBuilder.setUrl(withValue(displayUrl));
+
     String lastModified = l.getMetadata().getLastModified();
-    try {
-      metadata.setUpdateTime(
-          new DateTime(listLastModifiedDateFormat.get().parse(lastModified)).toStringRfc3339());
-    } catch (ParseException ex) {
-      log.log(Level.INFO, "Could not parse LastModified: {0}", lastModified);
+    if (!Strings.isNullOrEmpty(lastModified)) {
+      try {
+        listItemBuilder.setLastModified(
+            withValue(new DateTime(listLastModifiedDateFormat.get().parse(lastModified))));
+      } catch (ParseException ex) {
+        log.log(Level.INFO, "Could not parse LastModified: {0}", lastModified);
+      }
     }
-    metadata.setTitle(l.getMetadata().getTitle());
-    listItem.setMetadata(metadata);
-    RepositoryDoc.Builder listDoc = new RepositoryDoc.Builder().setItem(listItem);
+    listItemBuilder.setTitle(withValue(l.getMetadata().getTitle()));
+    RepositoryDoc.Builder listDoc = new RepositoryDoc.Builder().setItem(listItemBuilder.build());
     addChildIdsToRepositoryDoc(
         listDoc, processFolder(scConnector, listObject.getListId(), "", listObject));
-    List<ApiOperation> operations = Arrays.asList(listRootDoc, listDoc.build());
-    return ApiOperations.batch(operations.iterator());
+    return listDoc.build();
   }
 
   private ApiOperation getListItemDocContent(
@@ -1170,7 +1175,7 @@ public class SharePointRepository implements Repository {
     Holder<String> listId = new Holder<String>();
     Holder<String> itemId = new Holder<String>();
     boolean result =
-        scConnector.getSiteDataClient().getUrlSegments(polledItem.getName(), listId, itemId);
+        scConnector.getSiteDataClient().getUrlSegments(itemObject.getUrl(), listId, itemId);
     if (!result || (itemId.value == null) || (listId.value == null)) {
       log.log(
           Level.WARNING,
@@ -1213,28 +1218,33 @@ public class SharePointRepository implements Repository {
         scConnector.getSiteDataClient().getContentList(listId.value);
     // This should be in the form of "1234;#{GUID}". We want to extract the
     // {GUID}.
-    String scopeId = row.getAttribute(OWS_SCOPEID_ATTRIBUTE).split(";#", 2)[1];
+    String scopeId = getValueFromIdPrefixedField(row, OWS_SCOPEID_ATTRIBUTE);
     scopeId = scopeId.toLowerCase(Locale.ENGLISH);
-    String rawFileDirRef = row.getAttribute(OWS_FILEDIRREF_ATTRIBUTE);
     // This should be in the form of "1234;#site/list/path". We want to
     // extract the site/list/path. Path relative to host, even though it
     // doesn't have a leading '/'.
-    String folderDocId = scConnector.encodeDocId("/" + rawFileDirRef.split(";#", 2)[1]);
-    itemBuilder.setContainer(folderDocId);
+    String rawFileDirRef = getValueFromIdPrefixedField(row, OWS_FILEDIRREF_ATTRIBUTE);
+    String folderDocId = scConnector.encodeDocId("/" + rawFileDirRef);
     String rootFolderDocId = scConnector.encodeDocId(l.getMetadata().getRootFolder());
     // If the parent is a list, folderDocId will be same as
     // rootFolderDocId. If inheritance chain is not
-    // broken, item will inherit its permission from list root folder.
+    // broken, item will inherit its permission from list.
     // If parent is a folder, item will inherit its permissions from parent
     // folder.
     boolean parentIsList = folderDocId.equals(rootFolderDocId);
     String parentScopeId;
-    // If current item has same scope id as list then inheritance is not
-    // broken irrespective of current item is inside folder or not.
     String listScopeId = l.getMetadata().getScopeID().toLowerCase(Locale.ENGLISH);
-    if (parentIsList || scopeId.equals(listScopeId)) {
+    String possibleAclParent;
+    if (parentIsList) {
       parentScopeId = listScopeId;
+      itemBuilder.setContainer(l.getMetadata().getID());
+      possibleAclParent = l.getMetadata().getID();
     } else {
+      // If current item has same scope id as list then inheritance is not
+      // broken irrespective of current item is inside folder or not.
+      // Since item inside folder points to folder as container, we always need to fetch list item
+      // for folder irrespective of ACL inheritance.
+
       // Instead of using getUrlSegments and getContent(ListItem), we could
       // use just getContent(Folder). However, getContent(Folder) always
       // returns children which could make the call very expensive. In
@@ -1258,14 +1268,14 @@ public class SharePointRepository implements Repository {
       Element folderData = getFirstChildWithName(folderItem.getXml(), DATA_ELEMENT);
       Element folderRow = getChildrenWithName(folderData, ROW_ELEMENT).get(0);
       parentScopeId =
-          folderRow
-              .getAttribute(OWS_SCOPEID_ATTRIBUTE)
-              .split(";#", 2)[1]
-              .toLowerCase(Locale.ENGLISH);
+          getValueFromIdPrefixedField(folderRow, OWS_SCOPEID_ATTRIBUTE).toLowerCase(Locale.ENGLISH);
+      String folderObjectId = getUniqueIdFromRow(folderRow);
+      itemBuilder.setContainer(folderObjectId);
+      possibleAclParent = folderObjectId;
     }
     Acl.Builder aclBuilder = new Acl.Builder().setInheritanceType(InheritanceType.PARENT_OVERRIDE);
     if (scopeId.equals(parentScopeId)) {
-      aclBuilder.setInheritFrom(folderDocId);
+      aclBuilder.setInheritFrom(possibleAclParent);
     } else {
       // We have to search for the correct scope within the scopes element.
       // The scope provided in the metadata is for the parent list, not for
@@ -1288,7 +1298,7 @@ public class SharePointRepository implements Repository {
     }
     itemBuilder.setAcl(aclBuilder.build());
     // This should be in the form of "1234;#0". We want to extract the 0.
-    String type = row.getAttribute(OWS_FSOBJTYPE_ATTRIBUTE).split(";#", 2)[1];
+    String type = getValueFromIdPrefixedField(row, OWS_FSOBJTYPE_ATTRIBUTE);
     boolean isFolder = "1".equals(type);
     String serverUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
     if (serverUrl.contains("&") || serverUrl.contains("=") || serverUrl.contains("%")) {
@@ -1347,7 +1357,7 @@ public class SharePointRepository implements Repository {
     if (isDocument) {
       itemBuilder.setItemType(ItemType.CONTENT_ITEM);
       docBuilder.setContent(
-          getFileContent(polledItem.getName(), itemBuilder, true), ContentFormat.RAW);
+          getFileContent(itemObject.getUrl(), itemBuilder, true), ContentFormat.RAW);
     } else {
       // Since list items can have attachments as child items, marking list items as containers
       itemBuilder.setItemType(ItemType.CONTAINER_ITEM);
@@ -1434,7 +1444,7 @@ public class SharePointRepository implements Repository {
     itemBuilder
         .setAcl(acl)
         .setPayload(polledItem.decodePayload())
-        .setContainer(itemObject.getItemId())
+        .setContainer(getUniqueIdFromRow(row))
         .setItemType(ItemType.CONTENT_ITEM);
     return new RepositoryDoc.Builder()
         .setItem(itemBuilder.build())
@@ -1465,7 +1475,7 @@ public class SharePointRepository implements Repository {
                 .setListId(list.getID())
                 .setObjectId(list.getID())
                 .build();
-        entries.put(listUrl, new PushItem().encodePayload(payload.encodePayload()));
+        entries.put(list.getID(), new PushItem().encodePayload(payload.encodePayload()));
       }
     }
     return entries;
@@ -1504,6 +1514,7 @@ public class SharePointRepository implements Repository {
       for (Element row : getChildrenWithName(data, ROW_ELEMENT)) {
         String rowUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
         String itemId = scConnector.encodeDocId(getCanonicalUrl(rowUrl));
+        String objectId = getUniqueIdFromRow(row);
         SharePointObject payload =
             new SharePointObject.Builder(SharePointObject.LIST_ITEM)
                 .setListId(listGuid)
@@ -1512,7 +1523,7 @@ public class SharePointRepository implements Repository {
                 .setUrl(itemId)
                 .setObjectId("item")
                 .build();
-        entries.put(itemId, new PushItem().encodePayload(payload.encodePayload()));
+        entries.put(objectId, new PushItem().encodePayload(payload.encodePayload()));
       }
     }
     return entries;
