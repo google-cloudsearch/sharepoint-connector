@@ -14,9 +14,9 @@ import com.google.api.services.cloudsearch.v1.model.PushItem;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
-import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
 import com.google.common.util.concurrent.MoreExecutors;
@@ -86,6 +86,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.xml.namespace.QName;
 import javax.xml.ws.Holder;
 import org.w3c.dom.Attr;
@@ -110,6 +111,13 @@ public class SharePointRepository implements Repository {
    * http://msdn.microsoft.com/en-us/library/windows/desktop/ms675943.aspx .
    */
   private static final QName ROW_ELEMENT = new QName("#RowsetSchema", "row");
+
+  private static final QName SCHEMA_ELEMENT =
+      new QName("uuid:BDC6E3F0-6DA3-11d1-A2A3-00AA00C14882", "Schema");
+  private static final QName ELEMENT_TYPE_ELEMENT =
+      new QName("uuid:BDC6E3F0-6DA3-11d1-A2A3-00AA00C14882", "ElementType");
+  private static final QName ATTRIBUTE_TYPE_ELEMENT =
+      new QName("uuid:BDC6E3F0-6DA3-11d1-A2A3-00AA00C14882", "AttributeType");
   /**
    * Row attribute that contains a URL-like string identifying the object. Sometimes this can be
    * modified (by turning spaces into %20 and the like) to access the object. In general, this in
@@ -1190,7 +1198,6 @@ public class SharePointRepository implements Repository {
     Xml xml = i.getXml();
     Element data = getFirstChildWithName(xml, DATA_ELEMENT);
     Element row = getChildrenWithName(data, ROW_ELEMENT).get(0);
-
     String modifiedString = row.getAttribute(OWS_MODIFIED_ATTRIBUTE);
     if (modifiedString == null) {
       log.log(Level.FINE, "No last modified information for list item");
@@ -1304,7 +1311,8 @@ public class SharePointRepository implements Repository {
     if (serverUrl.contains("&") || serverUrl.contains("=") || serverUrl.contains("%")) {
       throw new AssertionError();
     }
-    Multimap<String, Object> extractedMetadataValues = extractMetadataValues(row);
+    Element schemaElement = getFirstChildWithName(xml, SCHEMA_ELEMENT);
+    Multimap<String, Object> extractedMetadataValues = extractMetadataValues(schemaElement, row);
     String contentType = row.getAttribute(OWS_CONTENTTYPE_ATTRIBUTE);
     String objectType = contentType == null ? "" : getNormalizedObjectType(contentType);
     if (!Strings.isNullOrEmpty(objectType) && StructuredData.hasObjectDefinition(objectType)) {
@@ -1618,26 +1626,47 @@ public class SharePointRepository implements Repository {
     return content;
   }
 
-  private static Multimap<String, Object> extractMetadataValues(Element ele) {
-    Multimap<String, Object> values = ArrayListMultimap.create();
-    NamedNodeMap map = ele.getAttributes();
+  private static Multimap<String, Object> extractMetadataValues(Element schema, Element row) {
+    Element elementType = getChildrenWithName(schema, ELEMENT_TYPE_ELEMENT).get(0);
+    List<Element> attributes = getChildrenWithName(elementType, ATTRIBUTE_TYPE_ELEMENT);
+    Map<String, String> fieldMapping = getInternalNameToDisplayNameMapping(attributes);
+    Multimap<String, Object> values = LinkedHashMultimap.create();
+    NamedNodeMap map = row.getAttributes();
     for (int i = 0; i < map.getLength(); i++) {
       Attr attribute = (Attr) map.item(i);
-      addMetadata(attribute.getName(), attribute.getValue(), values);
+      String attributeName = attribute.getName();
+      if ("ows_MetaInfo".equals(attributeName)) {
+        // ows_MetaInfo is parsed out into other fields for us by SharePoint.
+        // We filter it since it only duplicates those other fields.
+        continue;
+      }
+      addMetadata(
+          fieldMapping.getOrDefault(
+              attributeName,
+              getNormalizedPropertyName(sanitizeInternalFieldName(attributeName))),
+          attribute.getValue(),
+          values);
     }
     return values;
   }
 
+  /**
+   * Generates mapping between field internal name and display names.
+   *
+   * @param attributes from ListItem schema
+   * @return mapping between field internal name and display names.
+   */
+  private static Map<String, String> getInternalNameToDisplayNameMapping(List<Element> attributes) {
+    return attributes
+        .stream()
+        .filter(a -> a.hasAttribute("name") && a.hasAttribute("rs:name"))
+        .collect(
+            Collectors.toMap(
+                a -> a.getAttribute("name"),
+                a -> getNormalizedPropertyName(a.getAttribute("rs:name"))));
+  }
+
   private static void addMetadata(String name, String value, Multimap<String, Object> values) {
-    if ("ows_MetaInfo".equals(name)) {
-      // ows_MetaInfo is parsed out into other fields for us by SharePoint.
-      // We filter it since it only duplicates those other fields.
-      return;
-    }
-    if (name.startsWith("ows_")) {
-      name = name.substring("ows_".length());
-    }
-    name = decodeMetadataName(name);
     if (ALTERNATIVE_VALUE_PATTERN.matcher(value).find()) {
       // This is a lookup field. We need to take alternative values only.
       // Ignore the integer part. 314;#pi;#42;#the answer
@@ -1660,6 +1689,14 @@ public class SharePointRepository implements Repository {
     } else {
       values.put(name, value);
     }
+  }
+
+  private static String sanitizeInternalFieldName(String name) {
+    if (name.startsWith("ows_")) {
+      name = name.substring("ows_".length());
+    }
+    name = decodeMetadataName(name);
+    return name;
   }
 
   /**
@@ -1751,6 +1788,17 @@ public class SharePointRepository implements Repository {
    */
   private static String getNormalizedObjectType(String contentType) {
     return contentType.replaceAll("[^A-Za-z0-9]", "");
+  }
+
+  /**
+   * Converts property display name to potential property definition name defined in structured data
+   * by removing non alphanumeric characters from property display name.
+   *
+   * @param displayName property display name to normalized.
+   * @return normalized property definition name to be used for applying structured data.
+   */
+  private static String getNormalizedPropertyName(String displayName) {
+    return displayName.replaceAll("[^A-Za-z0-9]", "");
   }
 
   private static class InternalUrl {

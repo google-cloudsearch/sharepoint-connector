@@ -138,7 +138,7 @@ public class SharePointRepositoryTest {
         .thenReturn(siteConnectorFactoryBuilder);
     PropertyDefinition author =
         new PropertyDefinition()
-            .setName("Author")
+            .setName("CreatedBy")
             .setIsRepeatable(false)
             .setTextPropertyOptions(new TextPropertyOptions());
     PropertyDefinition multiValue =
@@ -666,8 +666,8 @@ public class SharePointRepositoryTest {
     values.put("ContentType", "Item");
     values.put("Modified", "2012-05-04T21:24:32Z");
     values.put("Created", "2012-05-01T22:14:06Z");
-    values.put("Author", "System Account");
-    values.put("Editor", "System Account");
+    values.put("CreatedBy", "System Account");
+    values.put("ModifiedBy", "System Account");
     values.putAll("MultiValue", Arrays.asList("alpha", "beta"));
     itemBuilder.setValues(values);
 
@@ -675,8 +675,9 @@ public class SharePointRepositoryTest {
     ContentTemplate listItemContentTemplate =
         new ContentTemplate.Builder()
             .setTitle("Title")
-            .setLowContent(Arrays.asList("Modified", "Created", "Author", "Editor", "ContentType"))
-            .setUnmappedColumnMode(UnmappedColumnsMode.APPEND)
+            .setLowContent(
+                Arrays.asList("Created", "CreatedBy", "ModifiedBy", "ContentType", "MultiValue"))
+            .setUnmappedColumnMode(UnmappedColumnsMode.IGNORE)
             .build();
 
     String expectedContent = listItemContentTemplate.apply(values);
@@ -699,7 +700,7 @@ public class SharePointRepositoryTest {
         returnedDoc.getItem().getStructuredData().getObject().getProperties(),
         hasItem(
             new NamedProperty()
-                .setName("Author")
+                .setName("CreatedBy")
                 .setTextValues(new TextValues().setValues(ImmutableList.of("System Account")))));
     assertThat(
         returnedDoc.getItem().getStructuredData().getObject().getProperties(),
@@ -878,8 +879,8 @@ public class SharePointRepositoryTest {
     values.put("ContentType", "Another Content Type");
     values.put("Modified", "2012-05-04T21:24:32Z");
     values.put("Created", "2012-05-01T22:14:06Z");
-    values.put("Author", "System Account");
-    values.put("Editor", "System Account");
+    values.put("CreatedBy", "System Account");
+    values.put("ModifiedBy", "System Account");
     values.putAll("MultiValue", Arrays.asList("alpha", "beta"));
     itemBuilder.setValues(values);
 
@@ -894,7 +895,7 @@ public class SharePointRepositoryTest {
         returnedDoc.getItem().getStructuredData().getObject().getProperties(),
         hasItem(
             new NamedProperty()
-                .setName("Author")
+                .setName("CreatedBy")
                 .setTextValues(new TextValues().setValues(ImmutableList.of("System Account")))));
     assertThat(
         returnedDoc.getItem().getStructuredData().getObject().getProperties(),
@@ -1769,7 +1770,7 @@ public class SharePointRepositoryTest {
     properties.put("contentTemplate.sharepointItem.title", "Title");
     properties.put(
         "contentTemplate.sharepointItem.quality.low",
-        "Modified,Created,Author,Editor,ContentType,MultiValue");
+        "Created,CreatedBy,ModifiedBy,ContentType,MultiValue");
     properties.put("contentTemplate.sharepointItem.unmappedColumnsMode", "IGNORE");
     properties.put("api.referenceIdentitySources", "GDC-PSL");
     properties.put("api.referenceIdentitySource.GDC-PSL.id", "idSourceGdcPsl");
