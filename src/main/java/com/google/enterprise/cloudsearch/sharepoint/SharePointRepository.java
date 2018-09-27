@@ -60,6 +60,7 @@ import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.Webs;
 import com.microsoft.schemas.sharepoint.soap.Xml;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.Authenticator;
 import java.net.MalformedURLException;
 import java.net.URI;
@@ -262,6 +263,7 @@ public class SharePointRepository implements Repository {
   private HttpClient httpClient;
   private SharePointIncrementalCheckpoint initIncrementalCheckpoint;
   private ContentTemplate listItemContentTemplate;
+  private HtmlContentFilter htmlContentFilter;
 
   SharePointRepository() {
     this(new HttpClientImpl.Builder(), new SiteConnectorFactoryImpl.Builder());
@@ -339,6 +341,7 @@ public class SharePointRepository implements Repository {
             .build();
     initIncrementalCheckpoint = computeIncrementalCheckpoint();
     listItemContentTemplate = ContentTemplate.fromConfiguration("sharepointItem");
+    htmlContentFilter = HtmlContentFilter.fromConfiguration();
   }
 
   @Override
@@ -1576,9 +1579,11 @@ public class SharePointRepository implements Repository {
       String fileUrl, IndexingItemBuilder item, boolean setLastModified) throws IOException {
     checkNotNull(item, "item can not be null");
     SharePointUrl sharepointFileUrl;
+    String baseUrl;
     try {
       sharepointFileUrl =
           buildSharePointUrl(fileUrl);
+      baseUrl = sharepointFileUrl.getRootUrl();
     } catch (URISyntaxException e) {
       throw new IOException(e);
     }
@@ -1616,14 +1621,24 @@ public class SharePointRepository implements Repository {
         log.log(Level.INFO, "Could not parse Last-Modified: {0}", lastModifiedString);
       }
     }
-    AbstractInputStreamContent content =
-        new ByteArrayContent(contentType, ByteStreams.toByteArray(fi.getContents()));
-    try {
-      fi.getContents().close();
-    } catch (IOException e) {
-      log.log(Level.WARNING, "Could not close content stream", e);
+    try (InputStream contentStream = fi.getContents()) {
+      if (isHtmlContent(contentType)) {
+        return htmlContentFilter.getParsedHtmlContent(contentStream, baseUrl, contentType);
+      } else {
+        return new ByteArrayContent(contentType, ByteStreams.toByteArray(contentStream));
+      }
     }
-    return content;
+  }
+
+  private static boolean isHtmlContent(String contentType) {
+    // Missing content type is treated as non HTML content. No filtering will be applied.
+    if (Strings.isNullOrEmpty(contentType)) {
+      return false;
+    }
+    // For some pages SharePoint returns text/html
+    // and for few SharePoint returns text/html; charset=utf-8;
+    return "text/html".equalsIgnoreCase(contentType)
+        || "text/html; charset=utf-8;".equalsIgnoreCase(contentType);
   }
 
   private static Multimap<String, Object> extractMetadataValues(Element schema, Element row) {
