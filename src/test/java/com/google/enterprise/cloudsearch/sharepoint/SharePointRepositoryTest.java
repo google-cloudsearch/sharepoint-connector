@@ -18,6 +18,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.google.api.client.http.ByteArrayContent;
+import com.google.api.client.json.GenericJson;
 import com.google.api.client.util.DateTime;
 import com.google.api.services.cloudsearch.v1.model.Item;
 import com.google.api.services.cloudsearch.v1.model.ItemMetadata;
@@ -26,6 +27,7 @@ import com.google.api.services.cloudsearch.v1.model.ObjectDefinition;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PropertyDefinition;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
+import com.google.api.services.cloudsearch.v1.model.RepositoryError;
 import com.google.api.services.cloudsearch.v1.model.Schema;
 import com.google.api.services.cloudsearch.v1.model.TextPropertyOptions;
 import com.google.api.services.cloudsearch.v1.model.TextValues;
@@ -1231,6 +1233,78 @@ public class SharePointRepositoryTest {
     RepositoryDoc returnedDoc = (RepositoryDoc) actual;
     assertEquals(expected.getItem(), returnedDoc.getItem());
     assertNull(returnedDoc.getItem().getStructuredData());
+  }
+
+  @Test
+  public void testGetDocInvalidPayload() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    Item entry =
+        new Item().setName("item-invalid-payload").encodePayload("invalid payload".getBytes(UTF_8));
+
+    ApiOperation actual = repo.getDoc(entry);
+    assertEquals(ApiOperations.deleteItem("item-invalid-payload"), actual);
+  }
+
+  @Test
+  public void testGetDocEmptyPayload() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    Item entry = new Item().setName("item-empty-payload");
+
+    ApiOperation actual = repo.getDoc(entry);
+    assertEquals(ApiOperations.deleteItem("item-empty-payload"), actual);
+  }
+
+  @Test
+  public void testGetDocEmptyPayloadGuid() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    Item entry = new Item().setName("{E7156244-AC2F-4402-AA74-7A365726CD02}");
+
+    ApiOperation actual = repo.getDoc(entry);
+    PushItems expected =
+        new PushItems.Builder()
+            .addPushItem(
+                "{E7156244-AC2F-4402-AA74-7A365726CD02}",
+                new PushItem()
+                    .setQueue("undefined")
+                    .setType("REPOSITORY_ERROR")
+                    .setRepositoryError(new RepositoryError().setErrorMessage("Empty Payload")))
+            .build();
+    assertEquals(expected, actual);
+  }
+
+  @Test
+  public void testGetDocEmptyPayloadUrl() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    Item entry = new Item().setName("http://localhost:1/subsite");
+
+    ApiOperation actual = repo.getDoc(entry);
+    PushItems expected =
+        new PushItems.Builder()
+            .addPushItem(
+                "http://localhost:1/subsite",
+                new PushItem()
+                    .setQueue("undefined")
+                    .setType("REPOSITORY_ERROR")
+                    .setRepositoryError(new RepositoryError().setErrorMessage("Empty Payload")))
+            .build();
+    assertEquals(expected, actual);
+  }
+
+  @Test
+  public void testGetDocInvalidJsonPayload() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    Item entry =
+        new Item()
+            .setName("item-invalid-payload")
+            .encodePayload(new GenericJson().toString().getBytes(UTF_8));
+
+    ApiOperation actual = repo.getDoc(entry);
+    assertEquals(ApiOperations.deleteItem("item-invalid-payload"), actual);
   }
 
   @Test

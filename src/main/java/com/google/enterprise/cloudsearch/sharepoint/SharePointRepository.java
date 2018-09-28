@@ -11,6 +11,7 @@ import com.google.api.client.util.Strings;
 import com.google.api.services.cloudsearch.v1.model.Item;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.api.services.cloudsearch.v1.model.PushItem;
+import com.google.api.services.cloudsearch.v1.model.RepositoryError;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
@@ -102,6 +103,7 @@ public class SharePointRepository implements Repository {
 
   private static final String PUSH_TYPE_MODIFIED = "MODIFIED";
   private static final String PUSH_TYPE_NOT_MODIFIED = "NOT_MODIFIED";
+  private static final String PUSH_TYPE_REPOSITORY_ERROR = "REPOSITORY_ERROR";
 
   /**
    * The data element within a self-describing XML blob. See
@@ -162,6 +164,9 @@ public class SharePointRepository implements Repository {
 
   private static final Pattern METADATA_ESCAPE_PATTERN = Pattern.compile("_x([0-9a-f]{4})_");
   private static final Pattern ALTERNATIVE_VALUE_PATTERN = Pattern.compile("^\\d+;#");
+  private static final Pattern GUID_PATTERN =
+      Pattern.compile(
+          "[0-9a-fA-F]{8}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{12}");
 
   static final String VIRTUAL_SERVER_ID = "ROOT_NEW";
   static final String SITE_COLLECTION_ADMIN_FRAGMENT = "admin";
@@ -742,15 +747,24 @@ public class SharePointRepository implements Repository {
   @Override
   public ApiOperation getDoc(Item item) throws RepositoryException {
     checkNotNull(item);
+    SharePointObject payloadObject = null;
     try {
-      SharePointObject payloadObject = SharePointObject.parse(item.decodePayload());
+      payloadObject = SharePointObject.parse(item.decodePayload());
+    } catch (IOException parseException) {
+      log.log(
+          Level.WARNING,
+          String.format("Invalid SharePoint payload Object on item %s", item),
+          parseException);
+      return deleteItemOrPushErrorForInvalidPayload(item);
+    }
+    try {
       String objectType = payloadObject.getObjectType();
       if (!payloadObject.isValid()) {
         log.log(
             Level.WARNING,
             "Invalid SharePoint payload Object {0} on item {1}",
             new Object[] {payloadObject, item});
-        throw new RepositoryException.Builder().setErrorMessage("Invalid payload").build();
+        return deleteItemOrPushErrorForInvalidPayload(item);
       }
 
       if (SharePointObject.NAMED_RESOURCE.equals(objectType)) {
@@ -797,12 +811,63 @@ public class SharePointRepository implements Repository {
         return getAttachmentDocContent(item, siteConnector, payloadObject);
       }
       PushItem notModified =
-          new PushItem().setType(PUSH_TYPE_NOT_MODIFIED).encodePayload(payloadObject.encodePayload());
+          new PushItem()
+              .setType(PUSH_TYPE_NOT_MODIFIED)
+              .encodePayload(payloadObject.encodePayload());
       return new PushItems.Builder().addPushItem(item.getName(), notModified).build();
     } catch (IOException e) {
       throw buildRepositoryExceptionFromIOException(
           String.format("error processing item %s", item.getName()), e);
     }
+  }
+
+  private ApiOperation deleteItemOrPushErrorForInvalidPayload(Item item) {
+    boolean isPotentialSharePointItem = isSharePointItem(item.getName());
+    if (isPotentialSharePointItem) {
+      // This may be potential dummy item created by API.
+      // Without payload we can't process this further.
+      // We are pushing this to queue "undefined" so subsequent poll won't return this item.
+      // When connector push this item explicitly, it is expected to be back in default queue with
+      // proper payload.
+      byte[] payload = item.decodePayload();
+      String errorMessage =
+          payload == null || payload.length == 0 ? "Empty Payload" : "Invalid Payload";
+      log.log(
+          Level.INFO,
+          "Pushing potential SharePointItem [{0}] with {1}, to undefined queue.",
+          new Object[] {item.getName(), errorMessage});
+      PushItem error =
+          new PushItem()
+              .setType(PUSH_TYPE_REPOSITORY_ERROR)
+              .setQueue("undefined")
+              .encodePayload(payload)
+              .setRepositoryError(new RepositoryError().setErrorMessage(errorMessage));
+      return new PushItems.Builder().addPushItem(item.getName(), error).build();
+    } else {
+      log.log(
+          Level.INFO,
+          "Deleting Item [{0}], since item is not parsed as"
+              + " vaild SharePoint connector generated item.",
+          item.getName());
+      return ApiOperations.deleteItem(item.getName());
+    }
+  }
+
+  private boolean isSharePointItem(String itemName) {
+    Matcher m = GUID_PATTERN.matcher(itemName);
+    boolean isPotentialSharePointItem = m.find();
+    if (!isPotentialSharePointItem) {
+      try {
+        SharePointUrl itemUrl = buildSharePointUrl(itemName);
+        isPotentialSharePointItem = ntlmAuthenticator.isPermittedHost(itemUrl.toURL());
+      } catch (Exception e) {
+        log.log(
+            Level.WARNING,
+            String.format("Item name [%s] can not be parsed as valid URL.", itemName),
+            e);
+      }
+    }
+    return isPotentialSharePointItem;
   }
 
   @Override
