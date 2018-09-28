@@ -55,6 +55,7 @@ import com.microsoft.schemas.sharepoint.soap.SPWeb;
 import com.microsoft.schemas.sharepoint.soap.Scopes;
 import com.microsoft.schemas.sharepoint.soap.Site;
 import com.microsoft.schemas.sharepoint.soap.Sites;
+import com.microsoft.schemas.sharepoint.soap.TrueFalseType;
 import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.Webs;
@@ -1045,6 +1046,13 @@ public class SharePointRepository implements Repository {
     List<ApiOperation> batchRequest = new ArrayList<ApiOperation>();
     Site site = scConnector.getSiteDataClient().getContentSite();
     Web rootWeb = scConnector.getSiteDataClient().getContentWeb();
+    if ("True".equals(rootWeb.getMetadata().getNoIndex())) {
+      log.log(
+          Level.INFO,
+          "Deleting site collection [{0}], since root web is marked as NoIndex.",
+          scConnector.getWebUrl());
+      return ApiOperations.deleteItem(polledItem.getName());
+    }
     List<Principal> admins = scConnector.getSiteCollectionAdmins(rootWeb);
     Acl.Builder siteAdmins = new Acl.Builder().setReaders(admins);
     String siteAdminFragmentId =
@@ -1093,6 +1101,13 @@ public class SharePointRepository implements Repository {
   private ApiOperation getWebDocContent(
       Item polledItem, SiteConnector scConnector, SharePointObject webObject) throws IOException {
     Web currentWeb = scConnector.getSiteDataClient().getContentWeb();
+    if ("True".equals(currentWeb.getMetadata().getNoIndex())) {
+      log.log(
+          Level.INFO,
+          "Deleting web [{0}], since web is marked as NoIndex.",
+          scConnector.getWebUrl());
+      return ApiOperations.deleteItem(polledItem.getName());
+    }
     String parentWebUrl = scConnector.getWebParentUrl();
     SiteConnector parentSiteConnector = getSiteConnector(scConnector.getSiteUrl(), parentWebUrl);
     Web parentWeb = parentSiteConnector.getSiteDataClient().getContentWeb();
@@ -1138,6 +1153,12 @@ public class SharePointRepository implements Repository {
         // List is available but lookup failed.
         throw new IOException("Failed to lookup list", e);
       }
+    }
+
+    if (l.getMetadata().getNoIndex() == TrueFalseType.TRUE) {
+      log.log(
+          Level.INFO, "Deleting List [{0}], since list is marked as NoIndex.", listObject.getUrl());
+      return ApiOperations.deleteItem(polledItem.getName());
     }
 
     Web w = scConnector.getSiteDataClient().getContentWeb();
@@ -1194,6 +1215,15 @@ public class SharePointRepository implements Repository {
           polledItem.getName());
       return ApiOperations.deleteItem(polledItem.getName());
     }
+    com.microsoft.schemas.sharepoint.soap.List l =
+        scConnector.getSiteDataClient().getContentList(listId.value);
+    if (l.getMetadata().getNoIndex() == TrueFalseType.TRUE) {
+      log.log(
+          Level.INFO,
+          "Deleting ListItem [{0}], since list is marked as NoIndex",
+          itemObject.getUrl());
+      return ApiOperations.deleteItem(polledItem.getName());
+    }
     IndexingItemBuilder itemBuilder =
         new IndexingItemBuilder(polledItem.getName()).setPayload(polledItem.decodePayload());
     ItemData i = scConnector.getSiteDataClient().getContentItem(listId.value, itemId.value);
@@ -1224,8 +1254,6 @@ public class SharePointRepository implements Repository {
       }
     }
     itemBuilder.setTitle(withValue(row.getAttribute(OWS_ITEM_TITLE)));
-    com.microsoft.schemas.sharepoint.soap.List l =
-        scConnector.getSiteDataClient().getContentList(listId.value);
     // This should be in the form of "1234;#{GUID}". We want to extract the
     // {GUID}.
     String scopeId = getValueFromIdPrefixedField(row, OWS_SCOPEID_ATTRIBUTE);
