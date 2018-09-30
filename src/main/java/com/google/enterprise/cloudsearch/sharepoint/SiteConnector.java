@@ -18,6 +18,7 @@ import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguratio
 import com.google.enterprise.cloudsearch.sdk.identity.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sharepoint.ActiveDirectoryPrincipal.PrincipalFormat;
+import com.google.enterprise.cloudsearch.sharepoint.SharePointConfiguration.SharePointDeploymentType;
 import com.microsoft.schemas.sharepoint.soap.GroupMembership;
 import com.microsoft.schemas.sharepoint.soap.Permission;
 import com.microsoft.schemas.sharepoint.soap.PolicyUser;
@@ -68,6 +69,7 @@ class SiteConnector {
   private final String siteUrl;
   private final String webUrl;
   private final Optional<ActiveDirectoryClient> activeDirectoryClient;
+  private final SharePointDeploymentType sharePointDeploymentType;
   /**
    * Lock for refreshing MemberIdMapping. We use a unique lock because it is held while waiting on
    * I/O.
@@ -98,6 +100,7 @@ class SiteConnector {
         Optional.ofNullable(
             referenceIdentitySourceConfiguration.get(DEFAULT_REFERENCE_IDENTITY_SOURCE_NAME));
     this.stripDomainInUserPrincipals = builder.stripDomainInUserPrincipals;
+    this.sharePointDeploymentType = builder.sharePointDeploymentType;
   }
 
   SiteDataClient getSiteDataClient() {
@@ -125,6 +128,10 @@ class SiteConnector {
       url = parts[0] + "//" + parts[2] + url;
     }
     return url;
+  }
+
+  private boolean isSharePointOnlineDeployment() {
+    return sharePointDeploymentType == SharePointDeploymentType.ONLINE;
   }
 
   Acl getWebApplicationPolicyAcl(VirtualServer vs) {
@@ -293,19 +300,17 @@ class SiteConnector {
           getLoginNameForPrincipal(
               user.getLoginName(), user.getName(), user.getSid(), isDomainGroup);
       if (!Strings.isNullOrEmpty(groupId)) {
-        ActiveDirectoryPrincipal groupPrincipal = ActiveDirectoryPrincipal.parse(groupId);
-        if (!Strings.isNullOrEmpty(groupPrincipal.getDomain())) {
-          // This is domain group.
-          Optional<RepositoryContext> domainContext =
-              context.getRepositoryContextForReferenceIdentitySource(groupPrincipal.getDomain());
-          if (domainContext.isPresent()) {
-            memberKey = domainContext.get().buildEntityKeyForGroup(groupId);
-          } else {
-            log.log(
-                Level.WARNING,
-                "Identity source configuration not available for principal {0}",
-                groupPrincipal);
-          }
+        Optional<RepositoryContext> referenceContext =
+            isSharePointOnlineDeployment()
+                ? getRepositoryContextForSharePointOnlineGroup(context)
+                : getRepositoryContextForActiveDirectoryGroup(groupId, context);
+        if (referenceContext.isPresent()) {
+          memberKey = referenceContext.get().buildEntityKeyForGroup(groupId);
+        } else {
+          log.log(
+              Level.WARNING,
+              "Identity source configuration not available for principal {0}",
+              groupId);
         }
       }
     } else {
@@ -321,12 +326,30 @@ class SiteConnector {
     return Optional.of(new Membership().setMemberKey(memberKey).setRoles(MEMBER_ROLES));
   }
 
+  private Optional<RepositoryContext> getRepositoryContextForActiveDirectoryGroup(
+      String groupId, RepositoryContext context) {
+    ActiveDirectoryPrincipal groupPrincipal = ActiveDirectoryPrincipal.parse(groupId);
+    if (Strings.isNullOrEmpty(groupPrincipal.getDomain())) {
+      return Optional.empty();
+    }
+    return context.getRepositoryContextForReferenceIdentitySource(groupPrincipal.getDomain());
+  }
+
+  private Optional<RepositoryContext> getRepositoryContextForSharePointOnlineGroup(
+      RepositoryContext context) {
+    return context.getRepositoryContextForReferenceIdentitySource(
+        DEFAULT_REFERENCE_IDENTITY_SOURCE_NAME);
+  }
+
   private Optional<EntityKey> getUserMembership(UserDescription user) throws IOException {
     if (!Strings.isNullOrEmpty(user.getEmail())) {
       return Optional.of(new EntityKey().setId(user.getEmail()));
     }
     if (activeDirectoryClient.isPresent()) {
-      String loginName = decodeClaim(user.getLoginName(), user.getName());
+      String loginName =
+          isSharePointOnlineDeployment()
+              ? decodeSharePointOnlineClaim(user.getLoginName())
+              : decodeClaim(user.getLoginName(), user.getName());
       ActiveDirectoryPrincipal principal = ActiveDirectoryPrincipal.parse(loginName);
       String userEmailByAccountName =
           activeDirectoryClient.get().getUserEmailByPrincipal(principal);
@@ -544,10 +567,18 @@ class SiteConnector {
         return displayName;
       }
     }
-    return decodeClaim(loginName, displayName);
+    return isSharePointOnlineDeployment()
+        ? decodeSharePointOnlineClaim(loginName)
+        : decodeClaim(loginName, displayName);
   }
 
   private Optional<Principal> getPrincipal(String id, boolean isGroup) {
+    return isSharePointOnlineDeployment()
+        ? getSharePointOnlinePrincipal(id, isGroup)
+        : getActiveDirectoryPrincipal(id, isGroup);
+  }
+
+  private Optional<Principal> getActiveDirectoryPrincipal(String id, boolean isGroup) {
     ActiveDirectoryPrincipal adPrincipal = ActiveDirectoryPrincipal.parse(id);
     if (adPrincipal.getFormat() == PrincipalFormat.NONE) {
       if (defaultIdentitySourceConfiguration.isPresent()) {
@@ -587,6 +618,20 @@ class SiteConnector {
     }
   }
 
+  private Optional<Principal> getSharePointOnlinePrincipal(String id, boolean isGroup) {
+    if (!defaultIdentitySourceConfiguration.isPresent()) {
+      return Optional.empty();
+    }
+    if (isGroup) {
+      return Optional.of(
+          Acl.getGroupPrincipal(
+              id, defaultIdentitySourceConfiguration.get().getIdentitySourceId()));
+    } else {
+      return Optional.of(
+          Acl.getUserPrincipal(id, defaultIdentitySourceConfiguration.get().getIdentitySourceId()));
+    }
+  }
+
   @VisibleForTesting
   static String decodeClaim(String loginName, String name) {
     if (!loginName.startsWith(IDENTITY_CLAIMS_PREFIX)
@@ -621,6 +666,30 @@ class SiteConnector {
     return null;
   }
 
+  @VisibleForTesting
+  static String decodeSharePointOnlineClaim(String loginName) {
+    // For SharePoint Online everything we support is claims authentication.
+    if (!loginName.startsWith(IDENTITY_CLAIMS_PREFIX)
+        && !loginName.startsWith(OTHER_CLAIMS_PREFIX)) {
+      return null;
+    }
+    // Forms authentication role / user
+    if (loginName.startsWith("c:0-.f|") || loginName.startsWith("i:0#.f|")) {
+      String[] parts = loginName.split(Pattern.quote("|"), 3);
+      if (parts.length == 3) {
+        return parts[2];
+      }
+      // Office 365 Security Groups
+    } else if (loginName.startsWith("c:0t.c|tenant|")) {
+      return loginName.substring("c:0t.c|tenant|".length());
+      // Azure Active Directory Groups
+    } else if (loginName.startsWith("c:0o.c|federateddirectoryclaimprovider|")) {
+      return loginName.substring("c:0o.c|federateddirectoryclaimprovider|".length());
+    }
+    log.log(Level.WARNING, "Unsupported claims value {0} for SharePoint Online", loginName);
+    return null;
+  }
+
   String getSiteUrl() {
     return siteUrl;
   }
@@ -639,6 +708,8 @@ class SiteConnector {
     private ImmutableMap<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration =
         ImmutableMap.of();
     private boolean stripDomainInUserPrincipals;
+    private SharePointDeploymentType sharePointDeploymentType =
+        SharePointDeploymentType.ON_PREMISES;
 
     Builder(String siteUrl, String webUrl) {
       this.siteUrl = siteUrl;
@@ -674,6 +745,11 @@ class SiteConnector {
 
     Builder setStripDomainInUserPrincipals(boolean stripDomainInUserPrincipals) {
       this.stripDomainInUserPrincipals = stripDomainInUserPrincipals;
+      return this;
+    }
+
+    Builder setSharePointDeploymentType(SharePointDeploymentType sharePointDeploymentType) {
+      this.sharePointDeploymentType = sharePointDeploymentType;
       return this;
     }
 

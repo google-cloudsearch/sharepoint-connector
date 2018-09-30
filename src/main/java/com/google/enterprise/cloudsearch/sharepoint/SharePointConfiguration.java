@@ -12,6 +12,7 @@ import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguratio
 import java.net.URISyntaxException;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -38,6 +39,13 @@ class SharePointConfiguration {
   private static boolean isCredentialOptional() {
     return System.getProperty("os.name", "").contains("Windows");
   }
+
+  enum SharePointDeploymentType {
+    ONLINE,
+    ON_PREMISES;
+  }
+
+  private final SharePointDeploymentType sharePointDeploymentType;
 
   private SharePointConfiguration(Builder builder) throws URISyntaxException {
     sharePointUrl = builder.sharePointUrl;
@@ -76,6 +84,7 @@ class SharePointConfiguration {
     this.referenceIdentitySourceConfiguration =
         checkNotNull(builder.referenceIdentitySourceConfiguration);
     this.stripDomainInUserPrincipals = builder.stripDomainInUserPrincipals;
+    this.sharePointDeploymentType = builder.sharePointDeploymentType;
   }
 
   @Override
@@ -100,7 +109,8 @@ class SharePointConfiguration {
         && Objects.equals(performBrowserLeniency, that.performBrowserLeniency)
         && Objects.equals(
             referenceIdentitySourceConfiguration, that.referenceIdentitySourceConfiguration)
-        && Objects.equals(stripDomainInUserPrincipals, that.stripDomainInUserPrincipals);
+        && Objects.equals(stripDomainInUserPrincipals, that.stripDomainInUserPrincipals)
+        && Objects.equals(sharePointDeploymentType, that.sharePointDeploymentType);
   }
 
   @Override
@@ -118,7 +128,8 @@ class SharePointConfiguration {
         performXmlValidation,
         performBrowserLeniency,
         referenceIdentitySourceConfiguration,
-        stripDomainInUserPrincipals);
+        stripDomainInUserPrincipals,
+        sharePointDeploymentType);
   }
 
   boolean isSiteCollectionUrl() {
@@ -151,6 +162,10 @@ class SharePointConfiguration {
 
   int getWebservicesReadTimeoutMills() {
     return webservicesReadTimeoutMills;
+  }
+
+  SharePointDeploymentType getSharePointDeploymentType() {
+    return sharePointDeploymentType;
   }
 
   boolean isPerformXmlValidation() {
@@ -196,6 +211,8 @@ class SharePointConfiguration {
         + referenceIdentitySourceConfiguration
         + ", stripDomainInUserPrincipals="
         + stripDomainInUserPrincipals
+        + ", sharePointDeploymentType="
+        + sharePointDeploymentType
         + "]";
   }
 
@@ -212,6 +229,8 @@ class SharePointConfiguration {
     private boolean performBrowserLeniency = true;
     private ImmutableMap<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration;
     private boolean stripDomainInUserPrincipals;
+    private SharePointDeploymentType sharePointDeploymentType =
+        SharePointDeploymentType.ON_PREMISES;
 
     Builder(SharePointUrl sharePointUrl) {
       this.sharePointUrl = sharePointUrl;
@@ -274,6 +293,11 @@ class SharePointConfiguration {
       return this;
     }
 
+    Builder setSharePointDeploymentType(SharePointDeploymentType sharePointDeploymentType) {
+      this.sharePointDeploymentType = sharePointDeploymentType;
+      return this;
+    }
+
     SharePointConfiguration build() throws URISyntaxException {
       if ((sharePointUrl == null)
           || (sharePointSiteCollectionOnly == null)
@@ -311,6 +335,12 @@ class SharePointConfiguration {
     boolean xmlValidation = Configuration.getBoolean("sharepoint.xmlValidation", false).get();
     boolean stripDomainInUserPrincipals =
         Configuration.getBoolean("sharepoint.stripDomainInUserPrincipals", false).get();
+    SharePointDeploymentType sharePointDeploymentType =
+        Configuration.getValue(
+                "sharepoint.deploymentType",
+                SharePointDeploymentType.ON_PREMISES,
+                (v) -> SharePointDeploymentType.valueOf(v.toUpperCase(Locale.ENGLISH)))
+            .get();
     try {
       return new Builder(sharepointUrl)
           .setUserName(username)
@@ -324,6 +354,7 @@ class SharePointConfiguration {
           .setStripDomainInUserPrincipals(stripDomainInUserPrincipals)
           .setReferenceIdentitySourceConfiguration(
               IdentitySourceConfiguration.getReferenceIdentitySourcesFromConfiguration())
+          .setSharePointDeploymentType(sharePointDeploymentType)
           .build();
     } catch (Exception e) {
       throw new InvalidConfigurationException("Invalid SharePoint Configuration", e);

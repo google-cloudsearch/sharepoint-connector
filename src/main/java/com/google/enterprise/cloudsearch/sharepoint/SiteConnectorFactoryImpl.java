@@ -5,6 +5,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
+import com.google.enterprise.cloudsearch.sharepoint.SharePointConfiguration.SharePointDeploymentType;
 import com.microsoft.schemas.sharepoint.soap.SiteDataSoap;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
@@ -35,6 +36,7 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
   private final ImmutableMap<String, IdentitySourceConfiguration>
       referenceIdentitySourceConfiguration;
   private final boolean stripDomainInUserPrincipals;
+  private final SharePointDeploymentType sharePointDeploymentType;
 
   private SiteConnectorFactoryImpl(Builder builder) {
     soapFactory = checkNotNull(builder.soapFactory);
@@ -44,6 +46,7 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
     referenceIdentitySourceConfiguration =
         checkNotNull(builder.referenceIdentitySourceConfiguration);
     stripDomainInUserPrincipals = checkNotNull(builder.stripDomainInUserPrincipals);
+    sharePointDeploymentType = builder.sharePointDeploymentType;
   }
 
   @Override
@@ -72,6 +75,7 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
             .setActiveDirectoryClient(activeDirectoryClient.orElse(null))
             .setReferenceIdentitySourceConfiguration(referenceIdentitySourceConfiguration)
             .setStripDomainInUserPrincipals(stripDomainInUserPrincipals)
+            .setSharePointDeploymentType(sharePointDeploymentType)
             .build();
     siteConnectors.putIfAbsent(web, siteConnector);
     siteConnector = siteConnectors.get(web);
@@ -146,6 +150,8 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
     private Optional<ActiveDirectoryClient> activeDirectoryClient;
     private ImmutableMap<String, IdentitySourceConfiguration> referenceIdentitySourceConfiguration;
     private boolean stripDomainInUserPrincipals;
+    private SharePointDeploymentType sharePointDeploymentType =
+        SharePointDeploymentType.ON_PREMISES;
 
     public Builder() {
       soapFactory = new SoapFactoryImpl();
@@ -182,6 +188,11 @@ class SiteConnectorFactoryImpl implements SiteConnectorFactory {
 
     Builder setStripDomainInUserPrincipals(boolean stripDomainInUserPrincipals) {
       this.stripDomainInUserPrincipals = stripDomainInUserPrincipals;
+      return this;
+    }
+
+    Builder setSharePointDeploymentType(SharePointDeploymentType sharePointDeploymentType) {
+      this.sharePointDeploymentType = sharePointDeploymentType;
       return this;
     }
 

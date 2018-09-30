@@ -344,6 +344,7 @@ public class SharePointRepository implements Repository {
             .setReferenceIdentitySourceConfiguration(
                 sharepointConfiguration.getReferenceIdentitySourceConfiguration())
             .setStripDomainInUserPrincipals(sharepointConfiguration.isStripDomainInUserPrincipals())
+            .setSharePointDeploymentType(sharepointConfiguration.getSharePointDeploymentType())
             .build();
     initIncrementalCheckpoint = computeIncrementalCheckpoint();
     listItemContentTemplate = ContentTemplate.fromConfiguration("sharepointItem");

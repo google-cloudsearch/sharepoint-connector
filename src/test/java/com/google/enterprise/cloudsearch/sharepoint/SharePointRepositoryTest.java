@@ -59,6 +59,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryDoc;
+import com.google.enterprise.cloudsearch.sharepoint.SharePointConfiguration.SharePointDeploymentType;
 import com.google.enterprise.cloudsearch.sharepoint.SharePointIncrementalCheckpoint.ChangeObjectType;
 import com.google.enterprise.cloudsearch.sharepoint.SiteDataClient.CursorPaginator;
 import com.google.enterprise.cloudsearch.sharepoint.SiteDataClient.Paginator;
@@ -138,6 +139,8 @@ public class SharePointRepositoryTest {
         .thenReturn(siteConnectorFactoryBuilder);
     when(siteConnectorFactoryBuilder.setStripDomainInUserPrincipals(false))
         .thenReturn(siteConnectorFactoryBuilder);
+    when(siteConnectorFactoryBuilder.setSharePointDeploymentType(any()))
+        .thenReturn(siteConnectorFactoryBuilder);
     PropertyDefinition author =
         new PropertyDefinition()
             .setName("CreatedBy")
@@ -201,6 +204,9 @@ public class SharePointRepositoryTest {
     inOrder.verify(siteConnectorFactoryBuilder).setActiveDirectoryClient(Optional.empty());
     inOrder.verify(siteConnectorFactoryBuilder).setReferenceIdentitySourceConfiguration(any());
     inOrder.verify(siteConnectorFactoryBuilder).setStripDomainInUserPrincipals(false);
+    inOrder
+        .verify(siteConnectorFactoryBuilder)
+        .setSharePointDeploymentType(SharePointDeploymentType.ON_PREMISES);
     inOrder.verify(siteConnectorFactoryBuilder).build();
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
   }
@@ -233,6 +239,7 @@ public class SharePointRepositoryTest {
     when(siteConnectorFactoryBuilder.setStripDomainInUserPrincipals(true))
         .thenReturn(siteConnectorFactoryBuilder);
     properties.put("sharepoint.userAgent", "custom-user-agent");
+    properties.put("sharepoint.deploymentType", "ONLINE");
     overrideConfig(properties);
     setupVirtualServerForInit();
     repo.init(repoContext);
@@ -253,6 +260,9 @@ public class SharePointRepositoryTest {
     inOrder.verify(siteConnectorFactoryBuilder).setActiveDirectoryClient(Optional.empty());
     inOrder.verify(siteConnectorFactoryBuilder).setReferenceIdentitySourceConfiguration(any());
     inOrder.verify(siteConnectorFactoryBuilder).setStripDomainInUserPrincipals(true);
+    inOrder
+        .verify(siteConnectorFactoryBuilder)
+        .setSharePointDeploymentType(SharePointDeploymentType.ONLINE);
     inOrder.verify(siteConnectorFactoryBuilder).build();
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
   }

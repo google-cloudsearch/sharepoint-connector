@@ -102,6 +102,7 @@ class SharePointIdentityRepository implements Repository {
             .setActiveDirectoryClient(ActiveDirectoryClient.fromConfiguration())
             .setReferenceIdentitySourceConfiguration(
                 sharepointConfiguration.getReferenceIdentitySourceConfiguration())
+            .setSharePointDeploymentType(sharepointConfiguration.getSharePointDeploymentType())
             .build();
   }
 

@@ -61,6 +61,8 @@ public class SharePointIdentityRepositoryTest {
     when(siteConnectorFactoryBuilder.build()).thenReturn(siteConnectorFactory);
     when(siteConnectorFactoryBuilder.setReferenceIdentitySourceConfiguration(any()))
         .thenReturn(siteConnectorFactoryBuilder);
+    when(siteConnectorFactoryBuilder.setSharePointDeploymentType(any()))
+        .thenReturn(siteConnectorFactoryBuilder);
   }
 
   @Test
