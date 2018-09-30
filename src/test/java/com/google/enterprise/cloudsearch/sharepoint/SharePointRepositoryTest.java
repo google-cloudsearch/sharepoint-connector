@@ -622,9 +622,10 @@ public class SharePointRepositoryTest {
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
                     .setInheritFrom("http://localhost:1")
                     .build())
-            .setUrl(FieldOrValue.withValue("http://localhost:1/Lists/Custom List/AllItems.aspx"))
-            .setContainer("http://localhost:1")
-            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setSourceRepositoryUrl(
+                FieldOrValue.withValue("http://localhost:1/Lists/Custom List/AllItems.aspx"))
+            .setContainerName("http://localhost:1")
+            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
             .setItemType(ItemType.CONTAINER_ITEM)
             .setTitle(FieldOrValue.withValue("Custom List"))
             .setPayload(listPayload.encodePayload());
@@ -751,11 +752,11 @@ public class SharePointRepositoryTest {
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
                     .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
                     .build())
-            .setUrl(
+            .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainer("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
             .setObjectType("Item")
             .setTitle(FieldOrValue.withValue("Inside Folder"))
@@ -925,10 +926,10 @@ public class SharePointRepositoryTest {
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
                     .setInheritFrom("http://localhost:1/Lists/Custom List/2_.000")
                     .build())
-            .setUrl(
+            .setSourceRepositoryUrl(
                 FieldOrValue.withValue(
                     "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf"))
-            .setContainer("{E7156244-AC2F-4402-AA74-7A365726CD02}")
+            .setContainerName("{E7156244-AC2F-4402-AA74-7A365726CD02}")
             .setPayload(payloadItem.encodePayload())
             .setItemType(ItemType.CONTENT_ITEM);
 
@@ -1011,11 +1012,11 @@ public class SharePointRepositoryTest {
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
                     .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
                     .build())
-            .setUrl(
+            .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainer("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
             .setObjectType("AnotherContentType")
             .setTitle(FieldOrValue.withValue("Inside Folder"))
@@ -1117,11 +1118,11 @@ public class SharePointRepositoryTest {
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
                     .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
                     .build())
-            .setUrl(
+            .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainer("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
             .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
@@ -1209,11 +1210,11 @@ public class SharePointRepositoryTest {
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
                     .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
                     .build())
-            .setUrl(
+            .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainer("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setLastModified(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreationTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
             .setPayload(payloadItem.encodePayload())
             .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);

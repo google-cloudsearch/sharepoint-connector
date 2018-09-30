@@ -1142,7 +1142,7 @@ public class SharePointRepository implements Repository {
     batchRequest.add(adminFragment);
     IndexingItemBuilder item = new IndexingItemBuilder(polledItem.getName());
     if (!sharepointConfiguration.isSiteCollectionUrl()) {
-      item.setContainer(VIRTUAL_SERVER_ID);
+      item.setContainerName(VIRTUAL_SERVER_ID);
     }
     Acl itemAcl =
         new Acl.Builder()
@@ -1189,7 +1189,7 @@ public class SharePointRepository implements Repository {
     IndexingItemBuilder item =
         new IndexingItemBuilder(polledItem.getName())
             .setAcl(aclBuilder.build())
-            .setContainer(parentWebUrl)
+            .setContainerName(parentWebUrl)
             .setPayload(polledItem.decodePayload())
             .setTitle(withValue(currentWeb.getMetadata().getTitle()))
             .setItemType(ItemType.CONTAINER_ITEM);
@@ -1239,7 +1239,7 @@ public class SharePointRepository implements Repository {
 
     IndexingItemBuilder listItemBuilder =
         new IndexingItemBuilder(polledItem.getName())
-            .setContainer(scConnector.getWebUrl())
+            .setContainerName(scConnector.getWebUrl())
             .setAcl(listAcl.build())
             .setItemType(ItemType.CONTAINER_ITEM)
             .setPayload(listObject.encodePayload());
@@ -1249,12 +1249,12 @@ public class SharePointRepository implements Repository {
             ? l.getMetadata().getRootFolder()
             : l.getMetadata().getDefaultViewUrl();
     String displayUrl = scConnector.encodeDocId(path);
-    listItemBuilder.setUrl(withValue(displayUrl));
+    listItemBuilder.setSourceRepositoryUrl(withValue(displayUrl));
 
     String lastModified = l.getMetadata().getLastModified();
     if (!Strings.isNullOrEmpty(lastModified)) {
       try {
-        listItemBuilder.setLastModified(
+        listItemBuilder.setUpdateTime(
             withValue(new DateTime(listLastModifiedDateFormat.get().parse(lastModified))));
       } catch (ParseException ex) {
         log.log(Level.INFO, "Could not parse LastModified: {0}", lastModified);
@@ -1301,7 +1301,7 @@ public class SharePointRepository implements Repository {
       log.log(Level.FINE, "No last modified information for list item");
     } else {
       try {
-        itemBuilder.setLastModified(
+        itemBuilder.setUpdateTime(
             withValue(new DateTime(modifiedDateFormat.get().parse(modifiedString))));
       } catch (ParseException ex) {
         log.log(Level.INFO, "Could not parse ows_Modified: {0}", modifiedString);
@@ -1312,7 +1312,7 @@ public class SharePointRepository implements Repository {
       log.log(Level.FINE, "No created time information for list item");
     } else {
       try {
-        itemBuilder.setCreationTime(
+        itemBuilder.setCreateTime(
             withValue(new DateTime(createdDateFormat.get().parse(createdString))));
       } catch (ParseException ex) {
         log.log(Level.INFO, "Could not parse ows_Created: {0}", createdString);
@@ -1340,7 +1340,7 @@ public class SharePointRepository implements Repository {
     String possibleAclParent;
     if (parentIsList) {
       parentScopeId = listScopeId;
-      itemBuilder.setContainer(l.getMetadata().getID());
+      itemBuilder.setContainerName(l.getMetadata().getID());
       possibleAclParent = l.getMetadata().getID();
     } else {
       // If current item has same scope id as list then inheritance is not
@@ -1373,7 +1373,7 @@ public class SharePointRepository implements Repository {
       parentScopeId =
           getValueFromIdPrefixedField(folderRow, OWS_SCOPEID_ATTRIBUTE).toLowerCase(Locale.ENGLISH);
       String folderObjectId = getUniqueIdFromRow(folderRow);
-      itemBuilder.setContainer(folderObjectId);
+      itemBuilder.setContainerName(folderObjectId);
       possibleAclParent = folderObjectId;
     }
     Acl.Builder aclBuilder = new Acl.Builder().setInheritanceType(InheritanceType.PARENT_OVERRIDE);
@@ -1437,7 +1437,7 @@ public class SharePointRepository implements Repository {
                 displayPage.getPath(),
                 "RootFolder=" + serverUrl,
                 null);
-        itemBuilder.setUrl(withValue(displayUrl.toString()));
+        itemBuilder.setSourceRepositoryUrl(withValue(displayUrl.toString()));
       } catch (URISyntaxException ex) {
         throw new IOException(ex);
       }
@@ -1475,7 +1475,7 @@ public class SharePointRepository implements Repository {
                 displayPage.getPath(),
                 "ID=" + itemId.value,
                 null);
-        itemBuilder.setUrl(withValue(viewItemUri.toString()));
+        itemBuilder.setSourceRepositoryUrl(withValue(viewItemUri.toString()));
       } catch (URISyntaxException e) {
         throw new IOException(e);
       }
@@ -1548,7 +1548,7 @@ public class SharePointRepository implements Repository {
     itemBuilder
         .setAcl(acl)
         .setPayload(polledItem.decodePayload())
-        .setContainer(getUniqueIdFromRow(row))
+        .setContainerName(getUniqueIdFromRow(row))
         .setItemType(ItemType.CONTENT_ITEM);
     return new RepositoryDoc.Builder()
         .setItem(itemBuilder.build())
@@ -1680,7 +1680,7 @@ public class SharePointRepository implements Repository {
     } catch (URISyntaxException e) {
       throw new IOException(e);
     }
-    item.setUrl(withValue(fileUrl));
+    item.setSourceRepositoryUrl(withValue(fileUrl));
     String filePath = sharepointFileUrl.getURI().getPath();
     String fileExtension = "";
     if (filePath.lastIndexOf('.') > 0) {
@@ -1708,7 +1708,7 @@ public class SharePointRepository implements Repository {
     String lastModifiedString = fi.getFirstHeaderWithName("Last-Modified");
     if ((lastModifiedString != null) && setLastModified) {
       try {
-        item.setLastModified(
+        item.setUpdateTime(
             withValue(new DateTime(dateFormatRfc1123.get().parse(lastModifiedString))));
       } catch (ParseException ex) {
         log.log(Level.INFO, "Could not parse Last-Modified: {0}", lastModifiedString);
