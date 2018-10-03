@@ -6,6 +6,7 @@ import static com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder
 
 import com.google.api.client.http.AbstractInputStreamContent;
 import com.google.api.client.http.ByteArrayContent;
+import com.google.api.client.http.HttpMediaType;
 import com.google.api.client.util.DateTime;
 import com.google.api.client.util.Strings;
 import com.google.api.services.cloudsearch.v1.model.Item;
@@ -256,6 +257,8 @@ public class SharePointRepository implements Repository {
           // Map .msg files to mime type application/vnd.ms-outlook
           .put(".msg", "application/vnd.ms-outlook")
           .build();
+
+  private static final HttpMediaType HTML_MEDIA_TYPE = new HttpMediaType("text/html");
 
   private static final Splitter ID_PREFIX_SPLITTER = Splitter.on(";#").limit(2);
 
@@ -1724,15 +1727,18 @@ public class SharePointRepository implements Repository {
     }
   }
 
-  private static boolean isHtmlContent(String contentType) {
+  @VisibleForTesting
+  static boolean isHtmlContent(String contentType) {
     // Missing content type is treated as non HTML content. No filtering will be applied.
     if (Strings.isNullOrEmpty(contentType)) {
       return false;
     }
-    // For some pages SharePoint returns text/html
-    // and for few SharePoint returns text/html; charset=utf-8;
-    return "text/html".equalsIgnoreCase(contentType)
-        || "text/html; charset=utf-8;".equalsIgnoreCase(contentType);
+    try {
+      return HTML_MEDIA_TYPE.equalsIgnoreParameters(new HttpMediaType(contentType));
+    } catch (IllegalArgumentException e) {
+      log.log(Level.WARNING, String.format("Failed to parse mimetype %s", contentType), e);
+      return false;
+    }
   }
 
   private static Multimap<String, Object> extractMetadataValues(Element schema, Element row) {

@@ -1970,6 +1970,21 @@ public class SharePointRepositoryTest {
     assertTrue(checkpointIterableRule.compare(expected, changes));
   }
 
+  @Test
+  public void testIsHtmlContent() {
+    assertFalse(SharePointRepository.isHtmlContent(null));
+    assertFalse(SharePointRepository.isHtmlContent(""));
+    assertFalse(SharePointRepository.isHtmlContent("invalid"));
+    assertFalse(SharePointRepository.isHtmlContent("text/plain"));
+    assertFalse(SharePointRepository.isHtmlContent("text/xhtml"));
+
+    assertTrue(SharePointRepository.isHtmlContent("text/html"));
+    assertTrue(SharePointRepository.isHtmlContent("text/html;"));
+    assertTrue(SharePointRepository.isHtmlContent("text/html; charset=utf-8"));
+    assertTrue(SharePointRepository.isHtmlContent("text/html; charset=utf-8;"));
+    assertTrue(SharePointRepository.isHtmlContent("text/html; something"));
+  }
+
   private void setupGetSiteAndWeb(String url, String outputSite, String outputWeb, long result)
       throws IOException {
     doAnswer(
