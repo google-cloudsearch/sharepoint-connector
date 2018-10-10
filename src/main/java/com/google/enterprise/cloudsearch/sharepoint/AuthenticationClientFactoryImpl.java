@@ -14,8 +14,6 @@
 
 package com.google.enterprise.cloudsearch.sharepoint;
 
-import static com.google.common.base.Preconditions.checkState;
-
 import com.google.common.base.Strings;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
@@ -23,9 +21,7 @@ import com.google.enterprise.cloudsearch.sdk.config.Configuration.Parser;
 import com.google.enterprise.cloudsearch.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
 import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationSoap;
 import java.net.URI;
-import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.xml.namespace.QName;
@@ -45,7 +41,6 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
       Logger.getLogger(AuthenticationClientFactoryImpl.class.getName());
 
   private final Service authenticationService;
-  private final AtomicReference<Optional<FormsAuthenticationHandler>> authenticationHandler;
 
   private static final Parser<FormsAuthenticationMode> AUTH_MODE_PARSER =
       value -> {
@@ -68,7 +63,6 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
         Service.create(
             AuthenticationClientFactoryImpl.class.getResource("wsdl/Authentication.wsdl"),
             new QName(XMLNS, "Authentication"));
-    authenticationHandler = new AtomicReference<>();
   }
 
   private static String handleEncoding(String endpoint) {
@@ -80,14 +74,13 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
     String authenticationEndPoint = String.format("%s/_vti_bin/Authentication.asmx", virtualServer);
     EndpointReference endpointRef =
         new W3CEndpointReferenceBuilder().address(handleEncoding(authenticationEndPoint)).build();
-    authenticationService.getPort(endpointRef, AuthenticationSoap.class);
     return authenticationService.getPort(endpointRef, AuthenticationSoap.class);
   }
 
   private SamlHandshakeManager getAdfsHandshakeManager(
       String virtualServer, String username, String password) {
-    String stsendpoint = Configuration.getString("sharepoint.stsendpoint", null).get();
-    String stsrealm = Configuration.getString("sharepoint.stsendpoint", null).get();
+    String stsendpoint = Configuration.getString("sharepoint.sts.endpoint", null).get();
+    String stsrealm = Configuration.getString("sharepoint.sts.realm", null).get();
     String login = Configuration.getString("sharepoint.adfsLogin", "").get();
     String trustlocation = Configuration.getString("sharepoint.trustLocation", "").get();
     AdfsHandshakeManager.Builder manager =
@@ -104,16 +97,8 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
   }
 
   @Override
-  public FormsAuthenticationHandler getFormsAuthenticationHandler() {
-    checkState(
-        authenticationHandler.get() != null, "Authentication client factory not initialized yet");
-    return authenticationHandler.get().orElse(null);
-  }
-
-  @Override
-  public void init(
+  public FormsAuthenticationHandler getFormsAuthenticationHandler(
       String virtualServer, String username, String password, ScheduledExecutorService executor) {
-    checkState(Configuration.isInitialized(), "Configuration not initialized");
     FormsAuthenticationMode authenticationMode =
         Configuration.getValue(
                 "sharepoint.formsAuthenticationMode",
@@ -124,37 +109,26 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
         Level.CONFIG, "Connector configured with FormsAuthenticationMode {0}", authenticationMode);
     switch (authenticationMode) {
       case NONE:
-        authenticationHandler.set(Optional.empty());
-        break;
+        return null;
       case FORMS:
-        SharePointFormsAuthenticationHandler formsHandler =
-            new SharePointFormsAuthenticationHandler.Builder(
-                    username, password, executor, getAuthenticationSoap(virtualServer))
-                .build();
-        authenticationHandler.set(Optional.of(formsHandler));
-        break;
+        return new SharePointFormsAuthenticationHandler.Builder(
+                username, password, executor, getAuthenticationSoap(virtualServer))
+            .build();
       case ADFS:
-        SamlAuthenticationHandler adfsHandler =
-            new SamlAuthenticationHandler.Builder(
-                    username,
-                    password,
-                    executor,
-                    getAdfsHandshakeManager(virtualServer, username, password))
-                .build();
-        authenticationHandler.set(Optional.of(adfsHandler));
-        break;
+        return new SamlAuthenticationHandler.Builder(
+                username,
+                password,
+                executor,
+                getAdfsHandshakeManager(virtualServer, username, password))
+            .build();
       case LIVE:
-        SamlAuthenticationHandler liveHandler =
-            new SamlAuthenticationHandler.Builder(
-                    username,
-                    password,
-                    executor,
-                    new LiveAuthenticationHandshakeManager.Builder(
-                            virtualServer, username, password)
-                        .build())
-                .build();
-        authenticationHandler.set(Optional.of(liveHandler));
-        break;
+        return new SamlAuthenticationHandler.Builder(
+                username,
+                password,
+                executor,
+                new LiveAuthenticationHandshakeManager.Builder(virtualServer, username, password)
+                    .build())
+            .build();
       default:
         throw new IllegalStateException("unsupported AuthenticationMode " + authenticationMode);
     }

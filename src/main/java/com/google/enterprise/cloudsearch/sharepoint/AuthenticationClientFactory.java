@@ -22,20 +22,14 @@ import java.util.concurrent.ScheduledExecutorService;
  */
 interface AuthenticationClientFactory {
   /**
-   * Initialize {@link AuthenticationClientFactory}
+   * Get an instance of {@link FormsAuthenticationHandler}
    *
    * @param virtualServer SharePoint virtual server URL
    * @param username SharePoint user account
    * @param password SharePoint user password
-   * @param executor schedule executor service to periodically refresh authentication tokens
-   */
-  void init(
-      String virtualServer, String username, String password, ScheduledExecutorService executor);
-
-  /**
-   * Get an instance of {@link FormsAuthenticationHandler}
-   *
+   * @param executor schedule executor service to periodically refresh authentication toke
    * @return an instance of {@link FormsAuthenticationHandler}
    */
-  FormsAuthenticationHandler getFormsAuthenticationHandler();
+  FormsAuthenticationHandler getFormsAuthenticationHandler(
+      String virtualServer, String username, String password, ScheduledExecutorService executor);
 }

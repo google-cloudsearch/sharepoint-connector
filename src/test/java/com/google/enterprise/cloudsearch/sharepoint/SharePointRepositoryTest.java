@@ -12,6 +12,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -171,8 +173,7 @@ public class SharePointRepositoryTest {
 
   @Test
   public void testInitInvalidSharePointUrl() throws RepositoryException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
 
     Properties baseConfig = getBaseConfig();
     baseConfig.put("sharepoint.server", "abc");
@@ -211,6 +212,61 @@ public class SharePointRepositoryTest {
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
   }
 
+  @Test
+  public void testInitAdfs() throws IOException {
+    AuthenticationClientFactory actual = new AuthenticationClientFactoryImpl();
+    AuthenticationClientFactory spyAuthenticationFactory = spy(actual);
+    FormsAuthenticationHandler mockFormsAuthenticationHandler =
+        mock(FormsAuthenticationHandler.class);
+    doAnswer(
+            invocation -> {
+              // This is forcing configuration validation
+              FormsAuthenticationHandler actualHandler =
+                  actual.getFormsAuthenticationHandler(
+                      invocation.getArgument(0),
+                      invocation.getArgument(1),
+                      invocation.getArgument(2),
+                      invocation.getArgument(3));
+              assertTrue(actualHandler instanceof SamlAuthenticationHandler);
+              return mockFormsAuthenticationHandler;
+            })
+        .when(spyAuthenticationFactory)
+        .getFormsAuthenticationHandler(eq("http://localhost:1"), eq("user"), eq("password"), any());
+    SharePointRepository repo =
+        new SharePointRepository(
+            httpClientBuilder, siteConnectorFactoryBuilder, spyAuthenticationFactory);
+    Properties baseConfig = getBaseConfig();
+    baseConfig.put("sharepoint.formsAuthenticationMode", "ADFS");
+    baseConfig.put("sharepoint.sts.endpoint", "https://stsendpoint");
+    baseConfig.put("sharepoint.sts.realm", "upn");
+    overrideConfig(baseConfig);
+    setupVirtualServerForInit();
+
+    SharePointRequestContext requestContext =
+        new SharePointRequestContext.Builder()
+            .setAuthenticationHandler(mockFormsAuthenticationHandler)
+            .setReadTimeoutMillis(180000)
+            .setSocketTimeoutMillis(30000)
+            .setUserAgent("")
+            .build();
+    repo.init(repoContext);
+    InOrder inOrder = inOrder(httpClientBuilder, siteConnectorFactoryBuilder);
+    inOrder.verify(httpClientBuilder).setSharePointRequestContext(requestContext);
+    inOrder.verify(httpClientBuilder).setMaxRedirectsAllowed(20);
+    inOrder.verify(httpClientBuilder).setPerformBrowserLeniency(true);
+    inOrder.verify(httpClientBuilder).build();
+    inOrder.verify(siteConnectorFactoryBuilder).setRequestContext(requestContext);
+    inOrder.verify(siteConnectorFactoryBuilder).setXmlValidation(false);
+    inOrder.verify(siteConnectorFactoryBuilder).setActiveDirectoryClient(Optional.empty());
+    inOrder.verify(siteConnectorFactoryBuilder).setReferenceIdentitySourceConfiguration(any());
+    inOrder.verify(siteConnectorFactoryBuilder).setStripDomainInUserPrincipals(false);
+    inOrder
+        .verify(siteConnectorFactoryBuilder)
+        .setSharePointDeploymentType(SharePointDeploymentType.ON_PREMISES);
+    inOrder.verify(siteConnectorFactoryBuilder).build();
+    verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
+  }
+
   private void setupVirtualServerForInit() throws IOException {
     SiteConnector scRoot =
         new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
@@ -226,8 +282,7 @@ public class SharePointRepositoryTest {
 
   @Test
   public void testInitNonDefaultValues() throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
 
     Properties properties = getBaseConfig();
     properties.put("connector.lenientUrlRulesAndCustomRedirect", "false");
@@ -291,8 +346,7 @@ public class SharePointRepositoryTest {
 
   @Test
   public void testGetDocIdsSiteCollectionOnly() throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -1321,8 +1375,7 @@ public class SharePointRepositoryTest {
   @Test
   public void testGetChangesNullCheckpointNoChangesSinceInitSiteCollectionOnly()
       throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -1358,8 +1411,7 @@ public class SharePointRepositoryTest {
   @Test
   public void testGetChangesWithCheckpointNoChangesSinceInitSiteCollectionOnly()
       throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -1394,8 +1446,7 @@ public class SharePointRepositoryTest {
   @Test
   public void testGetChangesInvalidCheckpointNoChangesSinceInitSiteCollectionOnly()
       throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -1431,8 +1482,7 @@ public class SharePointRepositoryTest {
   @Test
   public void testGetChangesSwitchToSiteCollectionOnlyModeNoChangesSinceInitSiteCollectionOnly()
       throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -1474,8 +1524,7 @@ public class SharePointRepositoryTest {
   @Test
   public void testGetChangesSwitchToAnotherSiteCollectionChangesSinceInitSiteCollectionOnly()
       throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -1545,8 +1594,7 @@ public class SharePointRepositoryTest {
 
   @Test
   public void testGetChangesSinceCheckpointSiteCollectionOnly() throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -1616,8 +1664,7 @@ public class SharePointRepositoryTest {
 
   @Test
   public void testGetChangesSitePermissions() throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -1686,8 +1733,7 @@ public class SharePointRepositoryTest {
 
   @Test
   public void testGetChangesForSubSite() throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     Properties properties = getBaseConfig();
     properties.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(properties);
@@ -2000,11 +2046,15 @@ public class SharePointRepositoryTest {
   }
 
   private SharePointRepository setUpDefaultRepository() throws IOException {
-    SharePointRepository repo =
-        new SharePointRepository(httpClientBuilder, siteConnectorFactoryBuilder);
+    SharePointRepository repo = getSharePointRepository();
     overrideConfig(getBaseConfig());
     setupVirtualServerForInit();
     return repo;
+  }
+
+  private SharePointRepository getSharePointRepository() {
+    return new SharePointRepository(
+        httpClientBuilder, siteConnectorFactoryBuilder, new AuthenticationClientFactoryImpl());
   }
 
   private Properties getBaseConfig() {

@@ -265,6 +265,7 @@ public class SharePointRepository implements Repository {
   private final HttpClientImpl.Builder httpClientBuilder;
   private final SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
   private final ScheduledExecutorService scheduledExecutorService;
+  private final AuthenticationClientFactory authenticationClientFactory;
 
   private SiteConnectorFactory siteConnectorFactory;
   private SharePointConfiguration sharepointConfiguration;
@@ -275,16 +276,22 @@ public class SharePointRepository implements Repository {
   private HtmlContentFilter htmlContentFilter;
 
   SharePointRepository() {
-    this(new HttpClientImpl.Builder(), new SiteConnectorFactoryImpl.Builder());
+    this(
+        new HttpClientImpl.Builder(),
+        new SiteConnectorFactoryImpl.Builder(),
+        new AuthenticationClientFactoryImpl());
   }
 
   @VisibleForTesting
   SharePointRepository(
       HttpClientImpl.Builder httpClientBuilder,
-      SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder) {
+      SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder,
+      AuthenticationClientFactory authenticationClientFactory) {
     this.httpClientBuilder = checkNotNull(httpClientBuilder);
     this.siteConnectorFactoryBuilder = checkNotNull(siteConnectorFactoryBuilder);
     this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
+    this.authenticationClientFactory =
+        checkNotNull(authenticationClientFactory, "authentication client factory can not be null");
   }
 
   @Override
@@ -305,11 +312,9 @@ public class SharePointRepository implements Repository {
       // Unfortunately, this is a JVM-wide modification.
       Authenticator.setDefault(ntlmAuthenticator);
     }
-    AuthenticationClientFactory authenticationClientFactory = new AuthenticationClientFactoryImpl();
-    authenticationClientFactory.init(
-        sharePointUrl.getUrl(), username, password, scheduledExecutorService);
     FormsAuthenticationHandler formsAuthenticationHandler =
-        authenticationClientFactory.getFormsAuthenticationHandler();
+        authenticationClientFactory.getFormsAuthenticationHandler(
+            sharePointUrl.getUrl(), username, password, scheduledExecutorService);
     if (formsAuthenticationHandler != null) {
       try {
         formsAuthenticationHandler.start();

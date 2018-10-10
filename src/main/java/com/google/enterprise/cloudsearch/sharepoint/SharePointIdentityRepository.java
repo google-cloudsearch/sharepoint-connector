@@ -37,6 +37,7 @@ class SharePointIdentityRepository implements Repository {
 
   private final SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder;
   private final ScheduledExecutorService scheduledExecutorService;
+  private final AuthenticationClientFactory authenticationClientFactory;
 
   private SharePointConfiguration sharepointConfiguration;
   private SiteConnectorFactory siteConnectorFactory;
@@ -44,13 +45,17 @@ class SharePointIdentityRepository implements Repository {
   private RepositoryContext repositoryContext;
 
   SharePointIdentityRepository() {
-    this(new SiteConnectorFactoryImpl.Builder());
+    this(new SiteConnectorFactoryImpl.Builder(), new AuthenticationClientFactoryImpl());
   }
 
   @VisibleForTesting
-  SharePointIdentityRepository(SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder) {
+  SharePointIdentityRepository(
+      SiteConnectorFactoryImpl.Builder siteConnectorFactoryBuilder,
+      AuthenticationClientFactory authenticationClientFactory) {
     this.siteConnectorFactoryBuilder = checkNotNull(siteConnectorFactoryBuilder);
     this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
+    this.authenticationClientFactory =
+        checkNotNull(authenticationClientFactory, "authentication client factory can not be null");
   }
 
   @Override
@@ -73,11 +78,9 @@ class SharePointIdentityRepository implements Repository {
     if (!"".equals(username) && !"".equals(password)) {
       Authenticator.setDefault(ntlmAuthenticator);
     }
-    AuthenticationClientFactory authenticationClientFactory = new AuthenticationClientFactoryImpl();
-    authenticationClientFactory.init(
-        sharePointUrl.getUrl(), username, password, scheduledExecutorService);
     FormsAuthenticationHandler formsAuthenticationHandler =
-        authenticationClientFactory.getFormsAuthenticationHandler();
+        authenticationClientFactory.getFormsAuthenticationHandler(
+            sharePointUrl.getUrl(), username, password, scheduledExecutorService);
     if (formsAuthenticationHandler != null) {
       try {
         formsAuthenticationHandler.start();

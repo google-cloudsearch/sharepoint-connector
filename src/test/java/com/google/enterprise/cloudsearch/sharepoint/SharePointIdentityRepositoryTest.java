@@ -5,8 +5,12 @@ import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import com.google.api.services.cloudidentity.v1beta1.model.EntityKey;
@@ -67,8 +71,7 @@ public class SharePointIdentityRepositoryTest {
 
   @Test
   public void testInitInvalidSharePointUrl() throws IOException {
-    SharePointIdentityRepository repo =
-        new SharePointIdentityRepository(siteConnectorFactoryBuilder);
+    SharePointIdentityRepository repo = getSharePointIdentityRepository();
 
     Properties baseConfig = getBaseConfig();
     baseConfig.put("sharepoint.server", "abc");
@@ -79,17 +82,45 @@ public class SharePointIdentityRepositoryTest {
 
   @Test
   public void testInit() throws IOException {
-    SharePointIdentityRepository repo =
-        new SharePointIdentityRepository(siteConnectorFactoryBuilder);
+    SharePointIdentityRepository repo = getSharePointIdentityRepository();
     Properties baseConfig = getBaseConfig();
     overrideConfig(baseConfig);
     repo.init(repoContext);
   }
 
   @Test
-  public void testListUsersEmpty() throws IOException {
+  public void testInitAdfs() throws IOException {
+    AuthenticationClientFactory actual = new AuthenticationClientFactoryImpl();
+    AuthenticationClientFactory spyAuthenticationFactory = spy(actual);
+    FormsAuthenticationHandler mockFormsAuthenticationHandler =
+        mock(FormsAuthenticationHandler.class);
+    doAnswer(
+            invocation -> {
+              // This is forcing configuration validation
+              FormsAuthenticationHandler actualHandler =
+                  actual.getFormsAuthenticationHandler(
+                      invocation.getArgument(0),
+                      invocation.getArgument(1),
+                      invocation.getArgument(2),
+                      invocation.getArgument(3));
+              assertTrue(actualHandler instanceof SamlAuthenticationHandler);
+              return mockFormsAuthenticationHandler;
+            })
+        .when(spyAuthenticationFactory)
+        .getFormsAuthenticationHandler(eq("http://localhost:1"), eq("user"), eq("password"), any());
     SharePointIdentityRepository repo =
-        new SharePointIdentityRepository(siteConnectorFactoryBuilder);
+        new SharePointIdentityRepository(siteConnectorFactoryBuilder, spyAuthenticationFactory);
+    Properties baseConfig = getBaseConfig();
+    baseConfig.put("sharepoint.formsAuthenticationMode", "ADFS");
+    baseConfig.put("sharepoint.sts.endpoint", "https://stsendpoint");
+    baseConfig.put("sharepoint.sts.realm", "upn");
+    overrideConfig(baseConfig);
+    repo.init(repoContext);
+  }
+
+  @Test
+  public void testListUsersEmpty() throws IOException {
+    SharePointIdentityRepository repo = getSharePointIdentityRepository();
     Properties baseConfig = getBaseConfig();
     overrideConfig(baseConfig);
     repo.init(repoContext);
@@ -98,8 +129,7 @@ public class SharePointIdentityRepositoryTest {
 
   @Test
   public void testListGroupsVirtualServer() throws IOException {
-    SharePointIdentityRepository repo =
-        new SharePointIdentityRepository(siteConnectorFactoryBuilder);
+    SharePointIdentityRepository repo = getSharePointIdentityRepository();
     Properties baseConfig = getBaseConfig();
     overrideConfig(baseConfig);
     repo.init(repoContext);
@@ -145,8 +175,7 @@ public class SharePointIdentityRepositoryTest {
 
   @Test
   public void testListGroupsSiteCollectionOnlyExplicit() throws IOException {
-    SharePointIdentityRepository repo =
-        new SharePointIdentityRepository(siteConnectorFactoryBuilder);
+    SharePointIdentityRepository repo = getSharePointIdentityRepository();
     Properties baseConfig = getBaseConfig();
     baseConfig.put("sharepoint.siteCollectionOnly", "true");
     overrideConfig(baseConfig);
@@ -179,8 +208,7 @@ public class SharePointIdentityRepositoryTest {
 
   @Test
   public void testListGroupsSiteCollectionOnlyByUrl() throws IOException {
-    SharePointIdentityRepository repo =
-        new SharePointIdentityRepository(siteConnectorFactoryBuilder);
+    SharePointIdentityRepository repo = getSharePointIdentityRepository();
     Properties baseConfig = getBaseConfig();
     baseConfig.put("sharepoint.server", "http://localhost:1/sites/SiteCollection");
     overrideConfig(baseConfig);
@@ -286,5 +314,10 @@ public class SharePointIdentityRepositoryTest {
         SiteDataClient.jaxbParse(
             SharePointResponseHelper.loadTestResponse("cd.xml"), ContentDatabase.class, false);
     when(siteDataClient.getContentContentDatabase(id, true)).thenReturn(cd);
+  }
+
+  private SharePointIdentityRepository getSharePointIdentityRepository() {
+    return new SharePointIdentityRepository(
+        siteConnectorFactoryBuilder, new AuthenticationClientFactoryImpl());
   }
 }
