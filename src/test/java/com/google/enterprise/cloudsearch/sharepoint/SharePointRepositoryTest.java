@@ -2211,7 +2211,7 @@ public class SharePointRepositoryTest {
     Item item =
         new Item()
             .setName(url)
-            .setMetadata(new ItemMetadata().setContainerName(parent))
+            .setMetadata(new ItemMetadata().setContainerName(parent).setSourceRepositoryUrl(url))
             .setItemType(ItemType.CONTAINER_ITEM.name());
     if (inherit) {
       new Acl.Builder()

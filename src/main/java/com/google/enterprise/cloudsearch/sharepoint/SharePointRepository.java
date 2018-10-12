@@ -1163,6 +1163,7 @@ public class SharePointRepository implements Repository {
     item.setItemType(ItemType.CONTAINER_ITEM);
     item.setPayload(polledItem.decodePayload());
     item.setTitle(withValue(rootWeb.getMetadata().getTitle()));
+    item.setSourceRepositoryUrl(withValue(scConnector.encodeDocId(rootWeb.getMetadata().getURL())));
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder().setItem(item.build());
     addChildIdsToRepositoryDoc(
         doc, getChildWebEntries(scConnector, site.getMetadata().getID(), rootWeb));
@@ -1201,6 +1202,8 @@ public class SharePointRepository implements Repository {
             .setContainerName(parentWebUrl)
             .setPayload(polledItem.decodePayload())
             .setTitle(withValue(currentWeb.getMetadata().getTitle()))
+            .setSourceRepositoryUrl(
+                withValue(scConnector.encodeDocId(currentWeb.getMetadata().getURL())))
             .setItemType(ItemType.CONTAINER_ITEM);
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder();
     addChildIdsToRepositoryDoc(
