@@ -21,6 +21,7 @@ import com.google.enterprise.cloudsearch.sdk.config.Configuration.Parser;
 import com.google.enterprise.cloudsearch.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
 import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationSoap;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -99,6 +100,13 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
   @Override
   public FormsAuthenticationHandler getFormsAuthenticationHandler(
       String virtualServer, String username, String password, ScheduledExecutorService executor) {
+    String rootUrl;
+    try {
+      SharePointUrl configuredUrl = new SharePointUrl.Builder(virtualServer).build();
+      rootUrl = configuredUrl.getRootUrl();
+    } catch (URISyntaxException e) {
+      throw new InvalidConfigurationException("failed to parse SharePoint URL.", e);
+    }
     FormsAuthenticationMode authenticationMode =
         Configuration.getValue(
                 "sharepoint.formsAuthenticationMode",
@@ -126,8 +134,7 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
                 username,
                 password,
                 executor,
-                new LiveAuthenticationHandshakeManager.Builder(virtualServer, username, password)
-                    .build())
+                new LiveAuthenticationHandshakeManager.Builder(rootUrl, username, password).build())
             .build();
       default:
         throw new IllegalStateException("unsupported AuthenticationMode " + authenticationMode);
