@@ -1552,15 +1552,16 @@ public class SharePointRepository implements Repository {
     }
     IndexingItemBuilder itemBuilder = new IndexingItemBuilder(polledItem.getName());
     AbstractInputStreamContent content = getFileContent(polledItem.getName(), itemBuilder, false);
+    String parentItem = getUniqueIdFromRow(row);
     Acl acl =
         new Acl.Builder()
             .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-            .setInheritFrom(itemObject.getItemId())
+            .setInheritFrom(parentItem)
             .build();
     itemBuilder
         .setAcl(acl)
         .setPayload(polledItem.decodePayload())
-        .setContainerName(getUniqueIdFromRow(row))
+        .setContainerName(parentItem)
         .setItemType(ItemType.CONTENT_ITEM);
     return new RepositoryDoc.Builder()
         .setItem(itemBuilder.build())

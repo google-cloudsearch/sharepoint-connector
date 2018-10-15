@@ -988,7 +988,7 @@ public class SharePointRepositoryTest {
             .setAcl(
                 new Acl.Builder()
                     .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
-                    .setInheritFrom("http://localhost:1/Lists/Custom List/2_.000")
+                    .setInheritFrom("{E7156244-AC2F-4402-AA74-7A365726CD02}")
                     .build())
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue(
