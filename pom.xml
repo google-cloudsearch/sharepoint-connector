@@ -8,7 +8,7 @@
   <packaging>jar</packaging>
 
   <name>google-cloudsearch-sharepoint-connector</name>
-  <url>http://maven.apache.org</url>
+  <url>https://cloud.google.com/products/search</url>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <java_version>1.8</java_version>
@@ -114,45 +114,15 @@
         </executions>
       </plugin>
       <plugin>
-        <!-- Create all-in-one (-withlib) JAR -->
-        <artifactId>maven-assembly-plugin</artifactId>
-        <configuration>
-          <archive>
-            <manifest>
-              <mainClass>com.google.enterprise.cloudsearch.sharepoint.SharePointRepositoryConnector</mainClass>
-              <addClasspath>true</addClasspath>
-            </manifest>
-            <manifestEntries>
-              <Implementation-Title>${project.name}</Implementation-Title>
-              <Implementation-Version>${project.version}</Implementation-Version>
-              <Implementation-Vendor>Google Inc.</Implementation-Vendor>
-            </manifestEntries>
-          </archive>
-          <descriptorRefs>
-            <descriptorRef>jar-with-dependencies</descriptorRef>
-          </descriptorRefs>
-          <finalName>${project.artifactId}-${project.version}-withlib</finalName>
-          <appendAssemblyId>false</appendAssemblyId>
-        </configuration>
-        <executions>
-          <execution>
-            <id>make-my-jar-with-dependencies</id>
-            <phase>package</phase>
-            <goals>
-              <goal>single</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
         <!-- JAR Manifest configuration -->
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.0.2</version>
         <configuration>
           <archive>
-            <addMavenDescriptor>false</addMavenDescriptor>
+            <addMavenDescriptor>true</addMavenDescriptor>
             <manifest>
+              <mainClass>com.google.enterprise.cloudsearch.sharepoint.SharePointRepositoryConnector</mainClass>
               <addClasspath>true</addClasspath>
               <classpathPrefix>lib/</classpathPrefix>
             </manifest>
