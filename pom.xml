@@ -25,6 +25,10 @@
           <include>LICENSE.txt</include>
         </includes>
       </resource>
+      <!-- Add resources folder explicitly -->
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
     </resources>
     <plugins>
       <plugin>
