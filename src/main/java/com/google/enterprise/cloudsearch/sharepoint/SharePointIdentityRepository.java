@@ -76,8 +76,8 @@ class SharePointIdentityRepository implements Repository {
 
   @Override
   public void init(RepositoryContext context) throws IOException {
-    // TODO(tvartak) : Create base SharePointRepository object to share between Identity and Content
-    // Connectors.
+    // TODO(b/118467845) : Create base SharePointRepository object to share between Identity and
+    // Content Connectors.
     checkState(Configuration.isInitialized());
     this.repositoryContext = checkNotNull(context);
     sharepointConfiguration = SharePointConfiguration.fromConfiguration();

@@ -20,6 +20,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
+/** Helper object for reading SharePoint web services response XML. */
 public class SharePointResponseHelper {
 
   public static String getSiteCollectionResponse() {

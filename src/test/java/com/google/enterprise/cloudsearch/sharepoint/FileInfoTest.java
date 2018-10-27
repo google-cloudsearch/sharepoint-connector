@@ -28,6 +28,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
+/** Unit tests for {@link FileInfo} */
 public class FileInfoTest {
   @Rule
   public ExpectedException thrown = ExpectedException.none();

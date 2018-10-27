@@ -40,6 +40,7 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnitRunner;
 
+/** Unit tests for {@link HttpClientImpl} */
 @RunWith(MockitoJUnitRunner.class)
 public class HttpClientImplTest {
   @Rule public ExpectedException thrown = ExpectedException.none();

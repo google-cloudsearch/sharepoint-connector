@@ -115,6 +115,7 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnitRunner;
 
+/** Unit tests for {@link SharePointRepository} */
 @RunWith(MockitoJUnitRunner.class)
 public class SharePointRepositoryTest {
   private static final byte[] NULL_CHECKPOINT = null;

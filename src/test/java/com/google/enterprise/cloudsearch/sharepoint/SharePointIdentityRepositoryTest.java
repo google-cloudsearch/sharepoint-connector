@@ -56,6 +56,7 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
+/** Unit tests for {@link SharePointIdentityRepository} */
 @RunWith(MockitoJUnitRunner.class)
 public class SharePointIdentityRepositoryTest {
   @Rule public ExpectedException thrown = ExpectedException.none();

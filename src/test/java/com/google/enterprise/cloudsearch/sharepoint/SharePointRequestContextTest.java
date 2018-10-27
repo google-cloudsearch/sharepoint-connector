@@ -38,6 +38,7 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
+/** Unit tests for {@link SharePointRequestContext} */
 @RunWith(MockitoJUnitRunner.class)
 public class SharePointRequestContextTest {
   @Rule public ExpectedException thrown = ExpectedException.none();

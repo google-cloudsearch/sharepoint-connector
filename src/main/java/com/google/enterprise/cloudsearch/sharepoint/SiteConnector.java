@@ -111,7 +111,6 @@ class SiteConnector {
     this.webUrl = builder.webUrl;
     this.activeDirectoryClient = Optional.ofNullable(builder.activeDirectoryClient);
     this.referenceIdentitySourceConfiguration = builder.referenceIdentitySourceConfiguration;
-    // TODO(tvartak) Make default identity source name configurable.
     this.defaultIdentitySourceConfiguration =
         Optional.ofNullable(
             referenceIdentitySourceConfiguration.get(DEFAULT_REFERENCE_IDENTITY_SOURCE_NAME));

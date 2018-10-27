@@ -32,7 +32,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-
+/** Unit tests for {@link AdfsHandshakeManager} */
 public class AdfsHandshakeManagerTest {
 
   @Rule

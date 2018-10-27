@@ -28,6 +28,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
+/** Unit tests for {@link SharePointObject} */
 public class SharePointObjectTest {
   private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
   @Rule

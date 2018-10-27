@@ -50,7 +50,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.xml.sax.SAXException;
 
-public class SiteDataClient {
+class SiteDataClient {
   /**
    * In SP2010 and above, the timeout is n * 60, where n is the number of items you want returned.
    * However, asking for more than 10 items seems to lose results. If timeout is less than 60 in SP

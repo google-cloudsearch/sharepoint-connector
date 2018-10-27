@@ -41,6 +41,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
+/** Unit tests for {@link SharePointFormsAuthenticationHandler} */
 public class SharePointFormsAuthenticationHandlerTest {
   @Rule
   public ExpectedException thrown = ExpectedException.none();

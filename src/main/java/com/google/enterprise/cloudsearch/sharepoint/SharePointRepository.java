@@ -115,7 +115,7 @@ import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
-public class SharePointRepository implements Repository {
+class SharePointRepository implements Repository {
   private static final Logger log = Logger.getLogger(SharePointRepository.class.getName());
 
   private static final String PUSH_TYPE_MODIFIED = "MODIFIED";
@@ -1110,7 +1110,8 @@ public class SharePointRepository implements Repository {
             }
           }
         } catch (IOException ex) {
-          log.log(Level.WARNING, "Error retriving sites from content database " + cdcd.getID(), ex);
+          log.log(
+              Level.WARNING, "Error retrieving sites from content database " + cdcd.getID(), ex);
         }
       }
       return docBuilder.build();

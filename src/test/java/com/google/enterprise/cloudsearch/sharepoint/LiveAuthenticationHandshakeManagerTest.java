@@ -31,6 +31,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
+/** Unit tests for {@link LiveAuthenticationHandshakeManager} */
 public class LiveAuthenticationHandshakeManagerTest {
 
   private static final String LIVE_AUTHENTICATION_RESPONSE

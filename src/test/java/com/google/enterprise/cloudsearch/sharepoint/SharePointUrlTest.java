@@ -27,6 +27,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
+/** Unit tests for {@link SharePointUrl} */
 public class SharePointUrlTest {
   @Rule
   public ExpectedException thrown = ExpectedException.none();

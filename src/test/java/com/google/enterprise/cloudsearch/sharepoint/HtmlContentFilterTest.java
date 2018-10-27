@@ -36,6 +36,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
+/** Unit tests for {@link HtmlContentFilter} */
 public class HtmlContentFilterTest {
   @Rule public ExpectedException thrown = ExpectedException.none();
   @Rule public ResetConfigRule resetConfig = new ResetConfigRule();
@@ -65,7 +66,7 @@ public class HtmlContentFilterTest {
     config.put("htmlContent.filters", "f1,f2");
     Configuration.initConfig(config);
     HtmlContentFilter filter = HtmlContentFilter.fromConfiguration();
-    assertEquals(ImmutableList.of("f1","f2"), filter.getFilters());
+    assertEquals(ImmutableList.of("f1", "f2"), filter.getFilters());
   }
 
   @Test

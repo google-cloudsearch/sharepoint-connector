@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/** Object for holding SharePoint change tokens. */
 public class SharePointIncrementalCheckpoint extends GenericJson {
   private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 
@@ -50,6 +51,7 @@ public class SharePointIncrementalCheckpoint extends GenericJson {
     setFactory(JSON_FACTORY);
   }
 
+  /** SharePoint object type for associated change token */
   public enum ChangeObjectType {
     @Value
     CONTENT_DB,
@@ -57,13 +59,14 @@ public class SharePointIncrementalCheckpoint extends GenericJson {
     SITE_COLLECTION;
   }
 
-  public enum DiffKind {
+  enum DiffKind {
     ADD,
     REMOVE,
     MODIFIED,
     NOT_MODIFIED
   }
 
+  /** Builder object for creating {@link SharePointIncrementalCheckpoint} */
   public static class Builder {
     private final Map<String, String> tokens = new HashMap<>();
     private final ChangeObjectType objectType;

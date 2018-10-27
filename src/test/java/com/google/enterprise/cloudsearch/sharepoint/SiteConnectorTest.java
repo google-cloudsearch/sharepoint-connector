@@ -75,6 +75,7 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
+/** Unit tests for {@link SiteConnector} */
 @RunWith(MockitoJUnitRunner.class)
 public class SiteConnectorTest {
   @Rule public ExpectedException thrown = ExpectedException.none();

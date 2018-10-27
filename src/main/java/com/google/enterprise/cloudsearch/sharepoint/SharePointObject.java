@@ -153,6 +153,7 @@ public class SharePointObject extends GenericJson {
     return itemId;
   }
 
+  /** Builder object for creating {@link SharePointObject} to include in payload. */
   public static class Builder {
     private String objectType;
     private String url;

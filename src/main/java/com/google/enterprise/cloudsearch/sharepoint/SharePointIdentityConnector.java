@@ -19,6 +19,7 @@ package com.google.enterprise.cloudsearch.sharepoint;
 import com.google.enterprise.cloudsearch.sdk.identity.FullSyncIdentityConnector;
 import com.google.enterprise.cloudsearch.sdk.identity.IdentityApplication;
 
+/** Connector for syncing SharePoint Local Groups with Google */
 public class SharePointIdentityConnector {
   public static void main(String[] args) throws InterruptedException {
     IdentityApplication application =
