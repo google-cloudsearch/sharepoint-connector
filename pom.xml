@@ -132,8 +132,9 @@
         <version>3.0.2</version>
         <configuration>
           <archive>
-            <addMavenDescriptor>false</addMavenDescriptor>
+            <addMavenDescriptor>true</addMavenDescriptor>
             <manifest>
+              <mainClass>com.google.enterprise.cloudsearch.sharepoint.SharePointRepositoryConnector</mainClass>
               <addClasspath>true</addClasspath>
               <classpathPrefix>lib/</classpathPrefix>
             </manifest>
