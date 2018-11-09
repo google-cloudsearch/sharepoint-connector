@@ -893,6 +893,132 @@ public class SharePointRepositoryTest {
   }
 
   @Test
+  public void testGetListItemDocContentEmptyTitle() throws IOException {
+    Properties baseConfig = getBaseConfig();
+    baseConfig.put("itemMetadata.title.field", "Name");
+    overrideConfig(baseConfig);
+    SharePointRepository repo = getSharePointRepository();
+    setupVirtualServerForInit();
+    repo.init(repoContext);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "http://localhost:1",
+        "http://localhost:1",
+        0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String listResponse =
+        SharePointResponseHelper.getListResponse()
+            .replaceAll("/sites/SiteCollection", "")
+            .replace(
+                "ScopeID=\"{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}\"",
+                "ScopeID=\"{2e29615c-59e7-493b-b08a-3642949cc069}\"");
+    setupList(listResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}");
+    SharePointObject payloadItem =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Custom List/2_.000")
+            .setObjectId("item")
+            .build();
+    setupUrlSegments(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}",
+        "2");
+    String listItemResponse = SharePointResponseHelper.getListItemResponse();
+    listItemResponse =
+        listItemResponse
+            .replaceAll("/Test Folder", "")
+            .replaceAll("/Test%20Folder", "")
+            .replaceAll("/sites/SiteCollection", "")
+            .replaceAll("sites/SiteCollection/", "")
+            .replaceAll("ows_Attachments='1'", "ows_Attachments='0'")
+            .replaceAll("Inside Folder", ""); // clear out Title value
+    setupListItem(listItemResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "2");
+
+    Item entry =
+        new Item()
+            .setName("{E7156244-AC2F-4402-AA74-7A365726CD02}")
+            .encodePayload(payloadItem.encodePayload());
+    IndexingItemBuilder itemBuilder =
+        new IndexingItemBuilder("{E7156244-AC2F-4402-AA74-7A365726CD02}")
+            .setAcl(
+                new Acl.Builder()
+                    .setInheritanceType(InheritanceType.PARENT_OVERRIDE)
+                    .setInheritFrom("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+                    .build())
+            .setSourceRepositoryUrl(
+                FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
+            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setPayload(payloadItem.encodePayload())
+            .setObjectType("Item")
+            .setTitle(FieldOrValue.withValue("2_.000")) // ows_FileLeafRef has display name "Name"
+            .setItemType(ItemType.CONTAINER_ITEM);
+
+    Multimap<String, Object> values = ArrayListMultimap.create();
+    values.put("Title", "");
+    values.put("ContentType", "Item");
+    values.put("Modified", "2012-05-04T21:24:32Z");
+    values.put("Created", "2012-05-01T22:14:06Z");
+    values.put("CreatedBy", "System Account");
+    values.put("ModifiedBy", "System Account");
+    values.putAll("MultiValue", Arrays.asList("alpha", "beta"));
+    itemBuilder.setValues(values);
+
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
+    ContentTemplate listItemContentTemplate =
+        new ContentTemplate.Builder()
+            .setTitle("Title")
+            .setLowContent(
+                Arrays.asList("Created", "CreatedBy", "ModifiedBy", "ContentType", "MultiValue"))
+            .setUnmappedColumnMode(UnmappedColumnsMode.IGNORE)
+            .build();
+
+    String expectedContent = listItemContentTemplate.apply(values);
+    expectedDoc.setContent(ByteArrayContent.fromString(null, expectedContent), ContentFormat.HTML);
+    RepositoryDoc expected = expectedDoc.build();
+    ApiOperation actual = repo.getDoc(entry);
+    RepositoryDoc returnedDoc = (RepositoryDoc) actual;
+    try (InputStream inputStream = returnedDoc.getContent().getInputStream()) {
+      String actualContent = new String(ByteStreams.toByteArray(inputStream), UTF_8);
+      assertEquals(expectedContent, actualContent);
+    }
+    assertEquals(expected.getItem(), returnedDoc.getItem());
+    assertEquals(expected.getContentFormat(), returnedDoc.getContentFormat());
+    assertEquals(expected.getRequestMode(), returnedDoc.getRequestMode());
+    // Explicitly validating that values set with structured data are populated via
+    // IndexingItemBuilder.
+    assertThat(
+        returnedDoc.getItem().getStructuredData().getObject().getProperties(),
+        hasItem(
+            new NamedProperty()
+                .setName("CreatedBy")
+                .setTextValues(new TextValues().setValues(ImmutableList.of("System Account")))));
+    assertThat(
+        returnedDoc.getItem().getStructuredData().getObject().getProperties(),
+        hasItem(
+            new NamedProperty()
+                .setName("MultiValue")
+                .setTextValues(new TextValues().setValues(ImmutableList.of("alpha", "beta")))));
+  }
+
+  @Test
   public void testGetListItemDocContentNoIndex() throws IOException {
     SharePointRepository repo = setUpDefaultRepository();
     repo.init(repoContext);

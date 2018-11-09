@@ -1084,7 +1084,7 @@ class SharePointRepository implements Repository {
       VirtualServer vs = vsConnector.getSiteDataClient().getContentVirtualServer();
 
       IndexingItemBuilder itemBuilder =
-          new IndexingItemBuilder(VIRTUAL_SERVER_ID)
+          IndexingItemBuilder.fromConfiguration(VIRTUAL_SERVER_ID)
               .setAcl(vsConnector.getWebApplicationPolicyAcl(vs))
               .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM)
               .setPayload(item.decodePayload());
@@ -1166,7 +1166,7 @@ class SharePointRepository implements Repository {
             .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM.name());
     RepositoryDoc adminFragment = new RepositoryDoc.Builder().setItem(adminFragmentItem).build();
     batchRequest.add(adminFragment);
-    IndexingItemBuilder item = new IndexingItemBuilder(polledItem.getName());
+    IndexingItemBuilder item = IndexingItemBuilder.fromConfiguration(polledItem.getName());
     if (!sharepointConfiguration.isSiteCollectionUrl()) {
       item.setContainerName(VIRTUAL_SERVER_ID);
     }
@@ -1214,7 +1214,7 @@ class SharePointRepository implements Repository {
       aclBuilder.setInheritFrom(scConnector.getSiteUrl(), SITE_COLLECTION_ADMIN_FRAGMENT);
     }
     IndexingItemBuilder item =
-        new IndexingItemBuilder(polledItem.getName())
+        IndexingItemBuilder.fromConfiguration(polledItem.getName())
             .setAcl(aclBuilder.build())
             .setContainerName(parentWebUrl)
             .setPayload(polledItem.decodePayload())
@@ -1267,7 +1267,7 @@ class SharePointRepository implements Repository {
     }
 
     IndexingItemBuilder listItemBuilder =
-        new IndexingItemBuilder(polledItem.getName())
+        IndexingItemBuilder.fromConfiguration(polledItem.getName())
             .setContainerName(scConnector.getWebUrl())
             .setAcl(listAcl.build())
             .setItemType(ItemType.CONTAINER_ITEM)
@@ -1318,8 +1318,8 @@ class SharePointRepository implements Repository {
           itemObject.getUrl());
       return ApiOperations.deleteItem(polledItem.getName());
     }
-    IndexingItemBuilder itemBuilder =
-        new IndexingItemBuilder(polledItem.getName()).setPayload(polledItem.decodePayload());
+    IndexingItemBuilder itemBuilder = IndexingItemBuilder.fromConfiguration(polledItem.getName());
+    itemBuilder.setPayload(polledItem.decodePayload());
     ItemData i = scConnector.getSiteDataClient().getContentItem(listId.value, itemId.value);
 
     Xml xml = i.getXml();
@@ -1567,7 +1567,7 @@ class SharePointRepository implements Repository {
       log.fine("Parent list item has no child attachments");
       return ApiOperations.deleteItem(polledItem.getName());
     }
-    IndexingItemBuilder itemBuilder = new IndexingItemBuilder(polledItem.getName());
+    IndexingItemBuilder itemBuilder = IndexingItemBuilder.fromConfiguration(polledItem.getName());
     AbstractInputStreamContent content = getFileContent(polledItem.getName(), itemBuilder, false);
     String parentItem = getUniqueIdFromRow(row);
     Acl acl =
