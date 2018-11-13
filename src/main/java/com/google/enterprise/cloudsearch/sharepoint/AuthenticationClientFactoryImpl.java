@@ -18,10 +18,12 @@ package com.google.enterprise.cloudsearch.sharepoint;
 
 import com.google.common.base.Strings;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
+import com.google.enterprise.cloudsearch.sdk.StartupException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration.Parser;
 import com.google.enterprise.cloudsearch.sharepoint.SamlAuthenticationHandler.SamlHandshakeManager;
 import com.microsoft.schemas.sharepoint.soap.authentication.AuthenticationSoap;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -58,7 +60,8 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
     NONE,
     FORMS,
     ADFS,
-    LIVE
+    LIVE,
+    CUSTOM
   }
 
   public AuthenticationClientFactoryImpl() {
@@ -97,6 +100,61 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
       manager.setTrustLocation(trustlocation);
     }
     return manager.build();
+  }
+
+  private FormsAuthenticationHandler getCustomFormsAuthenticationHandler(
+      String username, String password, ScheduledExecutorService executor) {
+    log.config("Connector configured to use custom forms authentication provider.");
+    String factoryMethodName =
+        Configuration.getString("formsAuthenticationHadler.factoryMethod", null).get();
+    Configuration.checkConfiguration(
+        !Strings.isNullOrEmpty(factoryMethodName), "Factory method can not be empty");
+    int sepIndex = factoryMethodName.lastIndexOf(".");
+    if (sepIndex == -1) {
+      throw new InvalidConfigurationException(
+          "Could not separate method name from class name: " + factoryMethodName);
+    }
+    log.log(Level.CONFIG, "Custom FormsAuthenticationHandler Factory [{0}]", factoryMethodName);
+    String className = factoryMethodName.substring(0, sepIndex);
+    String methodName = factoryMethodName.substring(sepIndex + 1);
+    log.log(
+        Level.FINE,
+        "Split {0} into class {1} and method {2}",
+        new Object[] {factoryMethodName, className, methodName});
+    Class<?> klass;
+    try {
+      klass = Class.forName(className);
+    } catch (ClassNotFoundException ex) {
+      throw new InvalidConfigurationException(
+          "Could not load class for FormsAuthenticationHandler: " + className, ex);
+    }
+    Method method;
+    try {
+      method =
+          klass.getDeclaredMethod(
+              methodName, String.class, String.class, ScheduledExecutorService.class);
+    } catch (NoSuchMethodException ex) {
+      throw new InvalidConfigurationException(
+          "Could not find method: "
+              + methodName
+              + " on class: "
+              + className
+              + "with signature String, String, ScheduledExecutorService",
+          ex);
+    }
+
+    log.log(Level.FINE, "Found method {0}", method);
+    Object o;
+    try {
+      o = method.invoke(null, username, password, executor);
+    } catch (Exception ex) {
+      throw new RuntimeException("Failure while running factory method: " + factoryMethodName, ex);
+    }
+    if (!(o instanceof FormsAuthenticationHandler)) {
+      throw new StartupException(
+          o.getClass().getName() + " is not an instance of FormsAuthenticationHandler");
+    }
+    return (FormsAuthenticationHandler) o;
   }
 
   @Override
@@ -138,6 +196,8 @@ class AuthenticationClientFactoryImpl implements AuthenticationClientFactory {
                 executor,
                 new LiveAuthenticationHandshakeManager.Builder(rootUrl, username, password).build())
             .build();
+      case CUSTOM:
+        return getCustomFormsAuthenticationHandler(username, password, executor);
       default:
         throw new IllegalStateException("unsupported AuthenticationMode " + authenticationMode);
     }

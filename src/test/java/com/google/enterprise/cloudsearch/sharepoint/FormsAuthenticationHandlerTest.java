@@ -86,12 +86,12 @@ public class FormsAuthenticationHandlerTest {
     }
 
     @Override
-    boolean isFormsAuthentication() throws IOException {
+    public boolean isFormsAuthentication() throws IOException {
       throw new UnsupportedOperationException();
     }
 
     @Override
-    AuthenticationResult authenticate() throws IOException {
+    public AuthenticationResult authenticate() throws IOException {
       throw new UnsupportedOperationException();
     }
   }

@@ -16,7 +16,7 @@
 
 package com.google.enterprise.cloudsearch.sharepoint;
 
-class AuthenticationResult {
+public class AuthenticationResult {
   private final String cookie;
   private final int cookieTimeOut;
   private final String errorCode;

@@ -28,7 +28,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /** Helper class to handle forms authentication. */
-abstract class FormsAuthenticationHandler {
+public abstract class FormsAuthenticationHandler {
   /** SharePoint's namespace. */
   private static final String XMLNS
       = "http://schemas.microsoft.com/sharepoint/soap/";
@@ -47,8 +47,8 @@ abstract class FormsAuthenticationHandler {
   private boolean isFormsAuthentication = false;
 
   @VisibleForTesting
-  FormsAuthenticationHandler(String username, String password,
-      ScheduledExecutorService executor) {
+  protected FormsAuthenticationHandler(
+      String username, String password, ScheduledExecutorService executor) {
     if (username == null || password == null || executor == null) {
       throw new NullPointerException();
     }
@@ -61,9 +61,9 @@ abstract class FormsAuthenticationHandler {
     return Collections.unmodifiableList(authenticationCookiesList);
   }
   // TODO : Remove isFormAuthentication.
-  abstract boolean isFormsAuthentication() throws IOException;
+  public abstract boolean isFormsAuthentication() throws IOException;
 
-  abstract AuthenticationResult authenticate() throws IOException;
+  public abstract AuthenticationResult authenticate() throws IOException;
 
   private void refreshCookies() throws IOException {
 
