@@ -135,8 +135,17 @@ public class ActiveDirectoryClientTest {
   }
 
   @Test
+  public void testDefaultNamingContextMissing() throws IOException, NamingException {
+    setupLdapContextAndConfig(389);
+    Attribute mockEmptyAttribute = mock(Attribute.class);
+    when(mockAttributes.get("defaultNamingContext")).thenReturn(mockEmptyAttribute);
+    thrown.expect(IOException.class);
+    ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
+  }
+
+  @Test
   public void testGetUserEmailByAccountNameWithLdap() throws IOException, NamingException {
-    setupLadapContextAndConfig(389);
+    setupLdapContextAndConfig(389);
     ActiveDirectoryClient client =
         ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
     NamingEnumeration<SearchResult> mockSearchResult = getMockNamingEnumeration();
@@ -157,8 +166,30 @@ public class ActiveDirectoryClientTest {
   }
 
   @Test
+  public void testGetUserEmailByAccountNameEmailIsEmpty() throws IOException, NamingException {
+    setupLdapContextAndConfig(389);
+    ActiveDirectoryClient client =
+        ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
+    NamingEnumeration<SearchResult> mockSearchResult = getMockNamingEnumeration();
+    when(mockContext.search(
+            eq("DC=MYDOMAIN,DC=COM"),
+            eq("(&(objectCategory=person)(objectClass=user)(sAMAccountName=user1))"),
+            any()))
+        .thenReturn(mockSearchResult);
+    when(mockSearchResult.hasMoreElements()).thenReturn(true);
+    Attribute emailAttribute = mock(Attribute.class);
+    when(emailAttribute.get(0)).thenReturn("");
+    Attributes searchResultsAttributes = mock(Attributes.class);
+    when(searchResultsAttributes.get("mail")).thenReturn(emailAttribute);
+    when(mockSearchResult.next())
+        .thenReturn(new SearchResult("result", null, searchResultsAttributes));
+    ActiveDirectoryPrincipal principal = ActiveDirectoryPrincipal.parse("MYDOMAIN\\user1");
+    assertNull(client.getUserEmailByPrincipal(principal));
+  }
+
+  @Test
   public void testGetUserEmailByAccountNameWithUpn() throws IOException, NamingException {
-    setupLadapContextAndConfig(389);
+    setupLdapContextAndConfig(389);
     ActiveDirectoryClient client =
         ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
     NamingEnumeration<SearchResult> mockSearchResult = getMockNamingEnumeration();
@@ -180,7 +211,7 @@ public class ActiveDirectoryClientTest {
 
   @Test
   public void testGetUserEmailByAccountNameWithOtherDomain() throws IOException, NamingException {
-    setupLadapContextAndConfig(389);
+    setupLdapContextAndConfig(389);
     ActiveDirectoryClient client =
         ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
     ActiveDirectoryPrincipal principal = ActiveDirectoryPrincipal.parse("OTHERDOMAIN\\user1");
@@ -188,8 +219,34 @@ public class ActiveDirectoryClientTest {
   }
 
   @Test
+  public void testGetUserEmailByAccountNameWithOtherDomainDnsRoot()
+      throws IOException, NamingException {
+    setupLdapContextAndConfig(389);
+    ActiveDirectoryClient client =
+        ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
+    ActiveDirectoryPrincipal principal = ActiveDirectoryPrincipal.parse("u1@myotherdomain.com");
+    assertNull(client.getUserEmailByPrincipal(principal));
+  }
+
+  @Test
+  public void testGetUserEmailByAccountNameEmptyResult() throws IOException, NamingException {
+    setupLdapContextAndConfig(389);
+    ActiveDirectoryClient client =
+        ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
+    NamingEnumeration<SearchResult> mockSearchResult = getMockNamingEnumeration();
+    when(mockContext.search(
+            eq("DC=MYDOMAIN,DC=COM"),
+            eq("(&(objectCategory=person)(objectClass=user)(sAMAccountName=user1))"),
+            any()))
+        .thenReturn(mockSearchResult);
+    when(mockSearchResult.hasMoreElements()).thenReturn(false);
+    ActiveDirectoryPrincipal principal = ActiveDirectoryPrincipal.parse("MYDOMAIN\\user1");
+    assertNull(client.getUserEmailByPrincipal(principal));
+  }
+
+  @Test
   public void testGetUserAccountBySidWithLdap() throws IOException, NamingException {
-    setupLadapContextAndConfig(389);
+    setupLdapContextAndConfig(389);
     ActiveDirectoryClient client =
         ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
     NamingEnumeration<SearchResult> mockSearchResultDomain = getMockNamingEnumeration();
@@ -225,11 +282,90 @@ public class ActiveDirectoryClientTest {
         client.getUserAccountBySid("S-1-5-21-736914693-3137354690-2813686979-1132"));
   }
 
-  private void setupLadapContextAndConfig() throws NamingException {
-    setupLadapContextAndConfig(3268);
+  @Test
+  public void testGetUserAccountBySidNotFound() throws IOException, NamingException {
+    setupLdapContextAndConfig(389);
+    ActiveDirectoryClient client =
+        ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
+    NamingEnumeration<SearchResult> mockSearchResultDomain = getMockNamingEnumeration();
+    when(mockContext.search(
+            eq("DC=MYDOMAIN,DC=COM"),
+            eq("(objectSid=S-1-5-21-736914693-3137354690-2813686979)"),
+            any()))
+        .thenReturn(mockSearchResultDomain);
+    when(mockSearchResultDomain.hasMoreElements()).thenReturn(true);
+    Attribute nameAttribute = mock(Attribute.class);
+    when(nameAttribute.get(0)).thenReturn("MYDOMAIN");
+    Attributes searchResultsAttributesDomain = mock(Attributes.class);
+    when(searchResultsAttributesDomain.get("name")).thenReturn(nameAttribute);
+    when(mockSearchResultDomain.next())
+        .thenReturn(new SearchResult("result", null, searchResultsAttributesDomain));
+
+    NamingEnumeration<SearchResult> mockSearchResultUser = getMockNamingEnumeration();
+    when(mockContext.search(
+            eq("DC=MYDOMAIN,DC=COM"),
+            eq("(objectSid=S-1-5-21-736914693-3137354690-2813686979-1132)"),
+            any()))
+        .thenReturn(mockSearchResultUser);
+    when(mockSearchResultUser.hasMoreElements()).thenReturn(false);
+    assertNull(client.getUserAccountBySid("S-1-5-21-736914693-3137354690-2813686979-1132"));
   }
 
-  private void setupLadapContextAndConfig(int port) throws NamingException {
+  @Test
+  public void testGetUserAccountBySidWithEmptyName() throws IOException, NamingException {
+    setupLdapContextAndConfig(389);
+    ActiveDirectoryClient client =
+        ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
+    NamingEnumeration<SearchResult> mockSearchResultDomain = getMockNamingEnumeration();
+    when(mockContext.search(
+            eq("DC=MYDOMAIN,DC=COM"),
+            eq("(objectSid=S-1-5-21-736914693-3137354690-2813686979)"),
+            any()))
+        .thenReturn(mockSearchResultDomain);
+    when(mockSearchResultDomain.hasMoreElements()).thenReturn(true);
+    Attribute nameAttribute = mock(Attribute.class);
+    when(nameAttribute.get(0)).thenReturn("MYDOMAIN");
+    Attributes searchResultsAttributesDomain = mock(Attributes.class);
+    when(searchResultsAttributesDomain.get("name")).thenReturn(nameAttribute);
+    when(mockSearchResultDomain.next())
+        .thenReturn(new SearchResult("result", null, searchResultsAttributesDomain));
+
+    NamingEnumeration<SearchResult> mockSearchResultUser = getMockNamingEnumeration();
+    when(mockContext.search(
+            eq("DC=MYDOMAIN,DC=COM"),
+            eq("(objectSid=S-1-5-21-736914693-3137354690-2813686979-1132)"),
+            any()))
+        .thenReturn(mockSearchResultUser);
+    when(mockSearchResultUser.hasMoreElements()).thenReturn(true);
+    Attribute accountAttribute = mock(Attribute.class);
+    when(accountAttribute.get(0)).thenReturn("");
+    Attributes searchResultsAttributesAccount = mock(Attributes.class);
+    when(searchResultsAttributesAccount.get("sAMAccountName")).thenReturn(accountAttribute);
+    when(mockSearchResultUser.next())
+        .thenReturn(new SearchResult("result", null, searchResultsAttributesAccount));
+
+    assertNull(client.getUserAccountBySid("S-1-5-21-736914693-3137354690-2813686979-1132"));
+  }
+
+  @Test
+  public void testGetUserAccountBySidNamingException() throws IOException, NamingException {
+    setupLdapContextAndConfig(389);
+    ActiveDirectoryClient client =
+        ActiveDirectoryClient.fromConfiguration(mockContextBuilder).get();
+    when(mockContext.search(
+            eq("DC=MYDOMAIN,DC=COM"),
+            eq("(objectSid=S-1-5-21-736914693-3137354690-2813686979)"),
+            any()))
+        .thenThrow(new NamingException("error in ldap query"));
+    thrown.expect(IOException.class);
+    client.getUserAccountBySid("S-1-5-21-736914693-3137354690-2813686979-1132");
+  }
+
+  private void setupLadapContextAndConfig() throws NamingException {
+    setupLdapContextAndConfig(3268);
+  }
+
+  private void setupLdapContextAndConfig(int port) throws NamingException {
     Properties properties = new Properties();
     properties.put("adLookup.host", "10.10.10.10");
     properties.put("adLookup.port", Integer.toString(port));

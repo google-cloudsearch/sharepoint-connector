@@ -15,6 +15,9 @@
  */
 package com.google.enterprise.cloudsearch.sharepoint;
 
+import static org.hamcrest.CoreMatchers.instanceOf;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
@@ -31,6 +34,7 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
+/** Unit tests for {@link AuthenticationClientFactoryImpl} */
 @RunWith(MockitoJUnitRunner.class)
 public class AuthenticationClientFactoryImplTest {
 
@@ -42,6 +46,61 @@ public class AuthenticationClientFactoryImplTest {
 
   private static final String CUSTOM_FORMS_AUTH_HANDLER_FACTORY =
       CustomFormsAuthenticationHandler.class.getName() + ".getInstance";
+
+  @Test
+  public void testInvalidFormsAuthenticationMode() {
+    Properties config = new Properties();
+    config.put("sharepoint.formsAuthenticationMode", "UNKNOWN");
+    setupConfig.initConfig(config);
+    AuthenticationClientFactory factory = new AuthenticationClientFactoryImpl();
+    thrown.expect(InvalidConfigurationException.class);
+    factory.getFormsAuthenticationHandler("http://sp.com", "username", "password", executor);
+  }
+
+  @Test
+  public void testFormsAuthenticationModeNone() {
+    Properties config = new Properties();
+    config.put("sharepoint.formsAuthenticationMode", "NONE");
+    setupConfig.initConfig(config);
+    AuthenticationClientFactory factory = new AuthenticationClientFactoryImpl();
+    assertNull(
+        factory.getFormsAuthenticationHandler("http://sp.com", "username", "password", executor));
+  }
+
+  @Test
+  public void testFormsAuthenticationModeSharePointForms() {
+    Properties config = new Properties();
+    config.put("sharepoint.formsAuthenticationMode", "FORMS");
+    setupConfig.initConfig(config);
+    AuthenticationClientFactory factory = new AuthenticationClientFactoryImpl();
+    FormsAuthenticationHandler formsAuthenticationHandler =
+        factory.getFormsAuthenticationHandler("http://sp.com", "username", "password", executor);
+    assertThat(formsAuthenticationHandler, instanceOf(SharePointFormsAuthenticationHandler.class));
+  }
+
+  @Test
+  public void testFormsAuthenticationModeLive() {
+    Properties config = new Properties();
+    config.put("sharepoint.formsAuthenticationMode", "LIVE");
+    setupConfig.initConfig(config);
+    AuthenticationClientFactory factory = new AuthenticationClientFactoryImpl();
+    FormsAuthenticationHandler formsAuthenticationHandler =
+        factory.getFormsAuthenticationHandler("http://sp.com", "username", "password", executor);
+    assertThat(formsAuthenticationHandler, instanceOf(SamlAuthenticationHandler.class));
+  }
+
+  @Test
+  public void testFormsAuthenticationModeAdfs() {
+    Properties config = new Properties();
+    config.put("sharepoint.formsAuthenticationMode", "ADFS");
+    config.put("sharepoint.sts.endpoint", "endpoint");
+    config.put("sharepoint.sts.realm", "urn:realm");
+    setupConfig.initConfig(config);
+    AuthenticationClientFactory factory = new AuthenticationClientFactoryImpl();
+    FormsAuthenticationHandler formsAuthenticationHandler =
+        factory.getFormsAuthenticationHandler("http://sp.com", "username", "password", executor);
+    assertThat(formsAuthenticationHandler, instanceOf(SamlAuthenticationHandler.class));
+  }
 
   @Test
   public void testCustomFormsAuthenticationHandler() {

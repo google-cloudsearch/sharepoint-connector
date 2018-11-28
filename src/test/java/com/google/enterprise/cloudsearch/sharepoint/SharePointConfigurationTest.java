@@ -72,6 +72,24 @@ public class SharePointConfigurationTest {
   }
 
   @Test
+  public void testFromConfigurationMatchesDefaultBuilder() throws Exception {
+    setupConfig.initConfig(getBaseConfiguration());
+    SharePointConfiguration fromConfiguration = SharePointConfiguration.fromConfiguration();
+    SharePointConfiguration fromBuilder =
+        new SharePointConfiguration.Builder(
+                new SharePointUrl.Builder("http://localhost")
+                    .setPerformBrowserLeniency(true)
+                    .build())
+            .setPassword("password")
+            .setUserName("username")
+            .setReferenceIdentitySourceConfiguration(ImmutableMap.of())
+            .build();
+    assertEquals(fromConfiguration, fromBuilder);
+    assertEquals(fromConfiguration.toString(), fromBuilder.toString());
+    assertEquals(fromConfiguration.hashCode(), fromBuilder.hashCode());
+  }
+
+  @Test
   public void testFromConfigurationWithSiteCollectionOnly() throws Exception {
     Properties baseConfiguration = getBaseConfiguration();
     baseConfiguration.put("sharepoint.siteCollectionOnly", "true");
