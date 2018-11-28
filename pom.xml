@@ -4,7 +4,7 @@
 
   <groupId>com.google.enterprise.cloudsearch</groupId>
   <artifactId>google-cloudsearch-sharepoint-connector</artifactId>
-  <version>v1-0.0.3-SNAPSHOT</version>
+  <version>v1-0.0.3</version>
   <packaging>jar</packaging>
 
   <name>Google Cloud Search SharePoint Connector</name>
@@ -222,12 +222,12 @@
     <dependency>
       <groupId>com.google.enterprise.cloudsearch</groupId>
       <artifactId>google-cloudsearch-indexing-connector-sdk</artifactId>
-      <version>v1-0.0.3-SNAPSHOT</version>
+      <version>v1-0.0.3</version>
     </dependency>
     <dependency>
       <groupId>com.google.enterprise.cloudsearch</groupId>
       <artifactId>google-cloudsearch-identity-connector-sdk</artifactId>
-      <version>v1-0.0.3-SNAPSHOT</version>
+      <version>v1-0.0.3</version>
     </dependency>
     <dependency>
       <groupId>com.sun.xml.ws</groupId>
