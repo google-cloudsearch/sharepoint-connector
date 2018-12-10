@@ -94,6 +94,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -103,6 +104,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.xml.ws.Holder;
 import org.junit.Before;
@@ -648,7 +650,7 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void testGetListDocContent() throws IOException {
+  public void testGetListDocContent() throws Exception {
     SharePointRepository repo = setUpDefaultRepository();
     repo.init(repoContext);
     SiteConnector scRoot =
@@ -706,7 +708,10 @@ public class SharePointRepositoryTest {
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom List/AllItems.aspx"))
             .setContainerName("http://localhost:1")
-            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
+            .setUpdateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.MODIFIED_DATE_LIST_FORMAT, "2012-05-04 21:24:32Z")))
             .setItemType(ItemType.CONTAINER_ITEM)
             .setTitle(FieldOrValue.withValue("Custom List"))
             .setPayload(listPayload.encodePayload());
@@ -770,7 +775,7 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void testGetListItemDocContent() throws IOException {
+  public void testGetListItemDocContent() throws Exception {
     SharePointRepository repo = setUpDefaultRepository();
     repo.init(repoContext);
     SiteConnector scRoot =
@@ -836,8 +841,16 @@ public class SharePointRepositoryTest {
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
             .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setUpdateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.MODIFIED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-04T21:24:32Z")))
+            .setCreateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
             .setObjectType("Item")
             .setTitle(FieldOrValue.withValue("Inside Folder"))
@@ -893,7 +906,7 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void testGetListItemDocContentEmptyTitle() throws IOException {
+  public void testGetListItemDocContentEmptyTitle() throws Exception {
     Properties baseConfig = getBaseConfig();
     baseConfig.put("itemMetadata.title.field", "Name");
     overrideConfig(baseConfig);
@@ -964,8 +977,16 @@ public class SharePointRepositoryTest {
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
             .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setUpdateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.MODIFIED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-04T21:24:32Z")))
+            .setCreateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
             .setObjectType("Item")
             .setTitle(FieldOrValue.withValue("2_.000")) // ows_FileLeafRef has display name "Name"
@@ -1155,7 +1176,7 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void testGetListItemDocContentNormalizedContentType() throws IOException {
+  public void testGetListItemDocContentNormalizedContentType() throws Exception {
     SharePointRepository repo = setUpDefaultRepository();
     repo.init(repoContext);
     SiteConnector scRoot =
@@ -1222,8 +1243,16 @@ public class SharePointRepositoryTest {
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
             .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setUpdateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.MODIFIED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-04T21:24:32Z")))
+            .setCreateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
             .setObjectType("AnotherContentType")
             .setTitle(FieldOrValue.withValue("Inside Folder"))
@@ -1261,7 +1290,7 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void testGetListItemDocContentObjectTypeNotAvailable() throws IOException {
+  public void testGetListItemDocContentObjectTypeNotAvailable() throws Exception {
     SharePointRepository repo = setUpDefaultRepository();
     repo.init(repoContext);
     SiteConnector scRoot =
@@ -1328,8 +1357,16 @@ public class SharePointRepositoryTest {
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
             .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setUpdateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.MODIFIED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-04T21:24:32Z")))
+            .setCreateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
             .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
@@ -1353,7 +1390,7 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void testGetListItemDocContentTypeNull() throws IOException {
+  public void testGetListItemDocContentTypeNull() throws Exception {
     SharePointRepository repo = setUpDefaultRepository();
     repo.init(repoContext);
     SiteConnector scRoot =
@@ -1420,8 +1457,16 @@ public class SharePointRepositoryTest {
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
             .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
-            .setUpdateTime(FieldOrValue.withValue(new DateTime("2012-05-04T14:24:32.000-07:00")))
-            .setCreateTime(FieldOrValue.withValue(new DateTime("2012-05-01T15:14:06.000-07:00")))
+            .setUpdateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.MODIFIED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-04T21:24:32Z")))
+            .setCreateTime(
+                FieldOrValue.withValue(
+                    getParsedDateTime(
+                        SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
+                        "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
             .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
@@ -2394,5 +2439,11 @@ public class SharePointRepositoryTest {
     }
     assertFalse("More elements expected", expected.hasNext());
     assertFalse("More elements present", actual.hasNext());
+  }
+
+  private static DateTime getParsedDateTime(String pattern, String value) throws Exception {
+    SimpleDateFormat dateTimeFormat = new SimpleDateFormat(pattern);
+    dateTimeFormat.setTimeZone(TimeZone.getTimeZone("GMT"));
+    return new DateTime(dateTimeFormat.parse(value));
   }
 }

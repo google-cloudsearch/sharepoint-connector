@@ -188,33 +188,43 @@ class SharePointRepository implements Repository {
   static final String VIRTUAL_SERVER_ID = "ROOT_NEW";
   static final String SITE_COLLECTION_ADMIN_FRAGMENT = "admin";
 
+  static final String MODIFIED_DATE_RESPONSE_HEADER_FORMAT = "EEE, dd MMM yyyy HH:mm:ss zzz";
+  static final String MODIFIED_DATE_LIST_ITEM_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+  static final String CREATED_DATE_LIST_ITEM_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+  static final String MODIFIED_DATE_LIST_FORMAT = "yyyy-MM-dd HH:mm:ss'Z'";
+
   private static final TimeZone gmt = TimeZone.getTimeZone("GMT");
   /** RFC 822 date format, as updated by RFC 1123. */
   private final ThreadLocal<DateFormat> dateFormatRfc1123 =
-      ThreadLocal.withInitial(() -> {
-        DateFormat df = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.ENGLISH);
-        df.setTimeZone(gmt);
-        return df;
-      });
+      ThreadLocal.withInitial(
+          () -> {
+            DateFormat df =
+                new SimpleDateFormat(MODIFIED_DATE_RESPONSE_HEADER_FORMAT, Locale.ENGLISH);
+            df.setTimeZone(gmt);
+            return df;
+          });
 
   private final ThreadLocal<DateFormat> modifiedDateFormat =
-      ThreadLocal.withInitial(() -> {
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ENGLISH);
-        df.setTimeZone(gmt);
-        return df;
-      });
+      ThreadLocal.withInitial(
+          () -> {
+            DateFormat df = new SimpleDateFormat(MODIFIED_DATE_LIST_ITEM_FORMAT, Locale.ENGLISH);
+            df.setTimeZone(gmt);
+            return df;
+          });
   private final ThreadLocal<DateFormat> createdDateFormat =
-      ThreadLocal.withInitial(() -> {
-            DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ENGLISH);
+      ThreadLocal.withInitial(
+          () -> {
+            DateFormat df = new SimpleDateFormat(CREATED_DATE_LIST_ITEM_FORMAT, Locale.ENGLISH);
             df.setTimeZone(gmt);
             return df;
           });
   private final ThreadLocal<DateFormat> listLastModifiedDateFormat =
-      ThreadLocal.withInitial(() -> {
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss'Z'", Locale.ENGLISH);
-        df.setTimeZone(gmt);
-        return df;
-      });
+      ThreadLocal.withInitial(
+          () -> {
+            DateFormat df = new SimpleDateFormat(MODIFIED_DATE_LIST_FORMAT, Locale.ENGLISH);
+            df.setTimeZone(gmt);
+            return df;
+          });
 
   /** Mapping of mime-types used by SharePoint to ones that the Cloud Search comprehends. */
   private static final Map<String, String> MIME_TYPE_MAPPING;
