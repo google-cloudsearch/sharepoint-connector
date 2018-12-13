@@ -1,0 +1,40 @@
+Google Cloud Search Connector for SharePoint
+
+This reference connector demonstrates using the SDK to upload SharePoint data to the indexing
+service.
+
+Documentation
+
+On-prem: https://developers.google.com/cloud-search/docs/guides/sharepoint-on-prem-connector
+Online:  https://developers.google.com/cloud-search/docs/guides/sharepoint-online-connector
+
+Build instructions
+
+1. Install the SDK into your local Maven repository
+
+   a. Clone the SDK repository from GitHub
+   b. Checkout the desired version of the SDK:
+
+      mvn checkout v1-0.0.3
+
+   c. Install the Cloud Search Identity API
+
+      ./identity/lib/install-cloudidentity.sh
+
+      (For Windows, the Maven command in that script can be run manually.)
+
+   d. Install the SDK components:
+
+      mvn install
+
+2. Build the connector
+
+   a. Clone the connector repository from GitHub
+   b. Checkout the desired version of the connector and build the ZIP file:
+
+      mvn checkout v1-0.0.3
+      mvn package
+
+      (To skip the tests when building the connector, use "mvn package -DskipTests".)
+
+See the documentation for the steps to install and run the connector.
