@@ -1,0 +1,27 @@
+<Groups xmlns="http://schemas.microsoft.com/sharepoint/soap/"><Group>
+<Group ID="3" Name="TeamSite Owners"
+ Description="Use this group to give people full control permissions to the SharePoint site: TeamSite" OwnerID="3"
+ OwnerIsUser="False" />
+<Users>
+<User ID="1" Sid="S-1-5-21-736914693-3137354690-2813686979-500"
+ Name="GDC-PSL\administrator"
+ LoginName="GDC-PSL\administrator" Email="" Notes=""
+ IsSiteAdmin="True" IsDomainGroup="False" />
+</Users></Group><Group>
+<Group ID="5" Name="TeamSite Members"
+ Description="Use this group to give people contribute permissions to the SharePoint site: TeamSite" OwnerID="3"
+ OwnerIsUser="False" />
+<Users>
+<User ID="6" Sid="S-1-5-21-736914693-3137354690-2813686979-1132"
+ Name="spuser2" LoginName="GDC-PSL\spuser2" Email=""
+ Notes="" IsSiteAdmin="False" IsDomainGroup="False" />
+<User ID="7" Sid="S-1-5-32-545" Name="BUILTIN\users"
+ LoginName="BUILTIN\users" Email="" Notes=""
+ IsSiteAdmin="False" IsDomainGroup="True" />
+<User ID="9" Sid="S-1-5-21-736914693-3137354690-2813686979-1134"
+ Name="spuser4" LoginName="GDC-PSL\spuser4" Email=""
+ Notes="" IsSiteAdmin="False" IsDomainGroup="False" />
+</Users></Group><Group>
+<Group ID="4" Name="TeamSite Visitors"
+ Description="Use this group to give people read permissions to the SharePoint site: TeamSite" OwnerID="3" OwnerIsUser="False" />
+<Users /></Group></Groups>

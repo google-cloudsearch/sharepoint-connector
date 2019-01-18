@@ -1,0 +1,50 @@
+<SPSite Change="Unchanged" ItemCount="1">
+<Messages/>
+<SPWeb Change="Unchanged" ItemCount="1">
+<SPList Change="Unchanged" ItemCount="1">
+<SPListItem Change="Add" ItemCount="0" UpdateSecurity="False"
+ Id="{5085be94-b5c1-45c8-a047-d0f03344fe31}"
+ ParentId="{133fcb96-7e9b-46c9-b5f3-09770a35ad8a}_"
+ InternalUrl="/siteurl=/siteid={bb3bb2dd-6ea7-471b-a361-6fb67988755c}/weburl=/webid={b2ea1067-3a54-4ab7-a459-c8ec864b97eb}/listid={133fcb96-7e9b-46c9-b5f3-09770a35ad8a}/folderurl=/itemid=2"
+ DisplayUrl="/sites/SiteCollection/Lists/Announcements/DispForm.aspx?ID=2"
+ ServerUrl="http://localhost:1" CRC="0" Url="2_.000">
+<ListItem>
+<z:row xmlns:z='#RowsetSchema' ows_ID='2'
+ ows_ContentTypeId='0x010400FDF586FAF309684984C89E7FB272808F'
+ ows_ContentType='Announcement' ows_Title='Test Announcement'
+ ows_Modified='2012-05-15T18:21:38Z'
+ ows_Created='2012-05-15T18:21:38Z'
+ ows_Author='1073741823;#System Account'
+ ows_Editor='1073741823;#System Account' ows_owshiddenversion='1'
+ ows_WorkflowVersion='1' ows__UIVersion='512'
+ ows__UIVersionString='1.0' ows_Attachments='0'
+ ows__ModerationStatus='0' ows_LinkTitleNoMenu='Test Announcement'
+ ows_LinkTitle='Test Announcement' ows_SelectTitle='2'
+ ows_Order='200.000000000000'
+ ows_GUID='{986A1401-9DE7-4CD5-8CC0-9BBC64D5F146}'
+ ows_FileRef='2;#Lists/Announcements/2_.000'
+ ows_FileDirRef='2;#Lists/Announcements'
+ ows_Last_x0020_Modified='2;#2012-05-15T18:21:38Z'
+ ows_Created_x0020_Date='2;#2012-05-15T18:21:38Z'
+ ows_FSObjType='2;#0' ows_PermMask='0x7fffffffffffffff'
+ ows_FileLeafRef='2;#2_.000'
+ ows_UniqueId='2;#{5085BE94-B5C1-45C8-A047-D0F03344FE31}'
+ ows_ProgId='2;#'
+ ows_ScopeId='2;#{01ABAC8C-66C8-4FED-829C-8DD02BBF40DD}'
+ ows__EditMenuTableStart='2_.000' ows__EditMenuTableEnd='2'
+ ows_LinkFilenameNoMenu='2_.000' ows_LinkFilename='2_.000'
+ ows_ServerUrl='/sites/SiteCollection/Lists/Announcements/2_.000'
+ ows_EncodedAbsUrl='http://localhost:1/sites/SiteCollection/Lists/Announcements/2_.000'
+ ows_BaseName='2_' ows_MetaInfo='2;#' ows__Level='1'
+ ows__IsCurrentVersion='1'
+ ows_Body='This is the body of the announcement.'
+ ows_ServerRedirected='0'/>
+<permissions>
+<permission memberid='2' mask='9223372036854775807' />
+<permission memberid='3' mask='9223372036854775807' />
+<permission memberid='4' mask='756052856929' />
+<permission memberid='5' mask='1856436900591' />
+</permissions></ListItem></SPListItem>
+</SPList>
+</SPWeb>
+</SPSite>
