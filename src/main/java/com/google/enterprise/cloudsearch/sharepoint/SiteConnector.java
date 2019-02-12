@@ -19,9 +19,9 @@ package com.google.enterprise.cloudsearch.sharepoint;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import com.google.api.services.cloudidentity.v1beta1.model.EntityKey;
-import com.google.api.services.cloudidentity.v1beta1.model.Membership;
-import com.google.api.services.cloudidentity.v1beta1.model.MembershipRole;
+import com.google.api.services.cloudidentity.v1.model.EntityKey;
+import com.google.api.services.cloudidentity.v1.model.Membership;
+import com.google.api.services.cloudidentity.v1.model.MembershipRole;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
@@ -338,7 +338,7 @@ class SiteConnector {
           new Object[] {user.getName(), user.getLoginName()});
       return Optional.empty();
     }
-    return Optional.of(new Membership().setMemberKey(memberKey).setRoles(MEMBER_ROLES));
+    return Optional.of(new Membership().setPreferredMemberKey(memberKey).setRoles(MEMBER_ROLES));
   }
 
   private Optional<RepositoryContext> getRepositoryContextForActiveDirectoryGroup(

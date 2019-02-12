@@ -25,9 +25,9 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.google.api.services.cloudidentity.v1beta1.model.EntityKey;
-import com.google.api.services.cloudidentity.v1beta1.model.Membership;
-import com.google.api.services.cloudidentity.v1beta1.model.MembershipRole;
+import com.google.api.services.cloudidentity.v1.model.EntityKey;
+import com.google.api.services.cloudidentity.v1.model.Membership;
+import com.google.api.services.cloudidentity.v1.model.MembershipRole;
 import com.google.api.services.cloudsearch.v1.model.Principal;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -420,7 +420,7 @@ public class SiteConnectorTest {
     EntityKey spuser2Key = new EntityKey().setId("spuser2@mygoogledomain.com");
     Membership spuser2Membership =
         new Membership()
-            .setMemberKey(spuser2Key)
+            .setPreferredMemberKey(spuser2Key)
             .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
     RepositoryContext context = mock(RepositoryContext.class);
     RepositoryContext referenceContext = mock(RepositoryContext.class);
@@ -430,14 +430,14 @@ public class SiteConnectorTest {
         new EntityKey().setId("BUILTIN\\users").setNamespace("idSourceBuiltin");
     Membership builtinUsersMembership =
         new Membership()
-            .setMemberKey(builtinUsersKey)
+            .setPreferredMemberKey(builtinUsersKey)
             .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
     when(referenceContext.buildEntityKeyForGroup("BUILTIN\\users"))
         .thenReturn(builtinUsersKey);
     EntityKey adminKey = new EntityKey().setId("admin@mygoogledomain.com");
     Membership adminMembership =
         new Membership()
-            .setMemberKey(adminKey)
+            .setPreferredMemberKey(adminKey)
             .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
     IdentityGroup teamOwners =
         setupIdentityGroupOnContext(
@@ -479,7 +479,7 @@ public class SiteConnectorTest {
     EntityKey spuser2Key = new EntityKey().setId("spuser2@mygoogledomain.com");
     Membership spuser2Membership =
         new Membership()
-            .setMemberKey(spuser2Key)
+            .setPreferredMemberKey(spuser2Key)
             .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
     RepositoryContext context = mock(RepositoryContext.class);
     RepositoryContext referenceContext = mock(RepositoryContext.class);
@@ -490,14 +490,14 @@ public class SiteConnectorTest {
         new EntityKey().setId("o356TenantGroup").setNamespace("identitysources/idsourceo365");
     Membership o356TenantGroupMembership =
         new Membership()
-            .setMemberKey(o356TenantGroupKey)
+            .setPreferredMemberKey(o356TenantGroupKey)
             .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
     when(referenceContext.buildEntityKeyForGroup("o356TenantGroup")).thenReturn(o356TenantGroupKey);
 
     EntityKey adminKey = new EntityKey().setId("admin@mygoogledomain.com");
     Membership adminMembership =
         new Membership()
-            .setMemberKey(adminKey)
+            .setPreferredMemberKey(adminKey)
             .setRoles(ImmutableList.of(new MembershipRole().setName("MEMBER")));
     IdentityGroup teamOwners =
         setupIdentityGroupOnContext(
