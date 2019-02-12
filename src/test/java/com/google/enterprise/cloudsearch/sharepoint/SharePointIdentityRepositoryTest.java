@@ -29,7 +29,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
-import com.google.api.services.cloudidentity.v1beta1.model.EntityKey;
+import com.google.api.services.cloudidentity.v1.model.EntityKey;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Streams;
 import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterable;
