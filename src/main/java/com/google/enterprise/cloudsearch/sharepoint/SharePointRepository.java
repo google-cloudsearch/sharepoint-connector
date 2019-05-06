@@ -42,6 +42,7 @@ import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterable;
 import com.google.enterprise.cloudsearch.sdk.CheckpointCloseableIterableImpl;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.RepositoryException;
+import com.google.enterprise.cloudsearch.sdk.RepositoryException.ErrorType;
 import com.google.enterprise.cloudsearch.sdk.StartupException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
@@ -1315,8 +1316,8 @@ class SharePointRepository implements Repository {
     if (!result || (itemId.value == null) || (listId.value == null)) {
       log.log(
           Level.WARNING,
-          "Unable to identify itemId for Item {0}. Deleting item",
-          polledItem.getName());
+          "Unable to identify itemId for Item [{0}]-[{1}]. Deleting item",
+          new Object[] {polledItem.getName(), itemObject.getUrl()});
       return ApiOperations.deleteItem(polledItem.getName());
     }
     com.microsoft.schemas.sharepoint.soap.List l =
@@ -1403,7 +1404,10 @@ class SharePointRepository implements Repository {
         throw new IOException("Could not find parent folder's itemId");
       }
       if (!listId.value.equals(folderListId.value)) {
-        throw new AssertionError("Unexpected listId value");
+        throw new RepositoryException.Builder()
+            .setErrorMessage("Unexpected listId value " + listId.value)
+            .setErrorType(ErrorType.CLIENT_ERROR)
+            .build();
       }
       ItemData folderItem =
           scConnector.getSiteDataClient().getContentItem(listId.value, folderItemId.value);
@@ -1442,10 +1446,6 @@ class SharePointRepository implements Repository {
     // This should be in the form of "1234;#0". We want to extract the 0.
     String type = getValueFromIdPrefixedField(row, OWS_FSOBJTYPE_ATTRIBUTE);
     boolean isFolder = "1".equals(type);
-    String serverUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
-    if (serverUrl.contains("&") || serverUrl.contains("=") || serverUrl.contains("%")) {
-      throw new AssertionError();
-    }
     Element schemaElement = getFirstChildWithName(xml, SCHEMA_ELEMENT);
     Multimap<String, Object> extractedMetadataValues = extractMetadataValues(schemaElement, row);
     String contentType = row.getAttribute(OWS_CONTENTTYPE_ATTRIBUTE);
@@ -1455,12 +1455,17 @@ class SharePointRepository implements Repository {
     }
     itemBuilder.setValues(extractedMetadataValues);
     if (isFolder) {
+      String serverUrl = row.getAttribute(OWS_SERVERURL_ATTRIBUTE);
       itemBuilder.setItemType(ItemType.CONTAINER_ITEM);
       String root = scConnector.encodeDocId(l.getMetadata().getRootFolder());
       root += "/";
       String folder = scConnector.encodeDocId(serverUrl);
       if (!folder.startsWith(root)) {
-        throw new AssertionError();
+        throw new RepositoryException.Builder()
+            .setErrorMessage(
+                String.format("Folder path [%s] doesn't start with root path [%s]", folder, root))
+            .setErrorType(ErrorType.CLIENT_ERROR)
+            .build();
       }
       try {
         String defaultViewUrl = scConnector.encodeDocId(l.getMetadata().getDefaultViewUrl());
@@ -1554,7 +1559,12 @@ class SharePointRepository implements Repository {
     ItemData itemData = scConnector.getSiteDataClient().getContentItem(listId.value, itemId.value);
     Xml xml = itemData.getXml();
     Element data = getFirstChildWithName(xml, DATA_ELEMENT);
-    assert data != null;
+    if (data == null) {
+      throw new RepositoryException.Builder()
+          .setErrorMessage("ItemData from getContentItem is null")
+          .setErrorType(ErrorType.CLIENT_ERROR)
+          .build();
+    }
     String itemCount = data.getAttribute("ItemCount");
     if ("0".equals(itemCount)) {
       log.fine("Could not get parent list item as ItemCount is 0.");
