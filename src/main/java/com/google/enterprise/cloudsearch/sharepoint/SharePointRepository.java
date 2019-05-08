@@ -1179,7 +1179,7 @@ class SharePointRepository implements Repository {
     batchRequest.add(adminFragment);
     IndexingItemBuilder item = IndexingItemBuilder.fromConfiguration(polledItem.getName());
     if (!sharepointConfiguration.isSiteCollectionUrl()) {
-      item.setContainerName(VIRTUAL_SERVER_ID);
+      item.setContainerName(withValue(VIRTUAL_SERVER_ID));
     }
     Acl itemAcl =
         new Acl.Builder()
@@ -1227,7 +1227,7 @@ class SharePointRepository implements Repository {
     IndexingItemBuilder item =
         IndexingItemBuilder.fromConfiguration(polledItem.getName())
             .setAcl(aclBuilder.build())
-            .setContainerName(parentWebUrl)
+            .setContainerName(withValue(parentWebUrl))
             .setPayload(polledItem.decodePayload())
             .setTitle(withValue(currentWeb.getMetadata().getTitle()))
             .setSourceRepositoryUrl(
@@ -1279,7 +1279,7 @@ class SharePointRepository implements Repository {
 
     IndexingItemBuilder listItemBuilder =
         IndexingItemBuilder.fromConfiguration(polledItem.getName())
-            .setContainerName(scConnector.getWebUrl())
+            .setContainerName(withValue(scConnector.getWebUrl()))
             .setAcl(listAcl.build())
             .setItemType(ItemType.CONTAINER_ITEM)
             .setPayload(listObject.encodePayload());
@@ -1380,7 +1380,7 @@ class SharePointRepository implements Repository {
     String possibleAclParent;
     if (parentIsList) {
       parentScopeId = listScopeId;
-      itemBuilder.setContainerName(l.getMetadata().getID());
+      itemBuilder.setContainerName(withValue(l.getMetadata().getID()));
       possibleAclParent = l.getMetadata().getID();
     } else {
       // If current item has same scope id as list then inheritance is not
@@ -1416,7 +1416,7 @@ class SharePointRepository implements Repository {
       parentScopeId =
           getValueFromIdPrefixedField(folderRow, OWS_SCOPEID_ATTRIBUTE).toLowerCase(Locale.ENGLISH);
       String folderObjectId = getUniqueIdFromRow(folderRow);
-      itemBuilder.setContainerName(folderObjectId);
+      itemBuilder.setContainerName(withValue(folderObjectId));
       possibleAclParent = folderObjectId;
     }
     Acl.Builder aclBuilder = new Acl.Builder().setInheritanceType(InheritanceType.PARENT_OVERRIDE);
@@ -1451,7 +1451,7 @@ class SharePointRepository implements Repository {
     String contentType = row.getAttribute(OWS_CONTENTTYPE_ATTRIBUTE);
     String objectType = contentType == null ? "" : getNormalizedObjectType(contentType);
     if (!Strings.isNullOrEmpty(objectType) && StructuredData.hasObjectDefinition(objectType)) {
-      itemBuilder.setObjectType(objectType);
+      itemBuilder.setObjectType(withValue(objectType));
     }
     itemBuilder.setValues(extractedMetadataValues);
     if (isFolder) {
@@ -1598,7 +1598,7 @@ class SharePointRepository implements Repository {
     itemBuilder
         .setAcl(acl)
         .setPayload(polledItem.decodePayload())
-        .setContainerName(parentItem)
+        .setContainerName(withValue(parentItem))
         .setItemType(ItemType.CONTENT_ITEM);
     return new RepositoryDoc.Builder()
         .setItem(itemBuilder.build())
@@ -1744,7 +1744,7 @@ class SharePointRepository implements Repository {
           Level.FINER,
           "Overriding content type as {0} for file extension {1}",
           new Object[] {contentType, fileExtension});
-      item.setMimeType(contentType);
+      item.setMimeType(withValue(contentType));
     } else {
       contentType = fi.getFirstHeaderWithName("Content-Type");
       if (contentType != null) {
@@ -1752,7 +1752,7 @@ class SharePointRepository implements Repository {
         if (MIME_TYPE_MAPPING.containsKey(lowerType)) {
           contentType = MIME_TYPE_MAPPING.get(lowerType);
         }
-        item.setMimeType(contentType);
+        item.setMimeType(withValue(contentType));
       }
     }
     String lastModifiedString = fi.getFirstHeaderWithName("Last-Modified");
