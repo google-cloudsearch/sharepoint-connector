@@ -79,6 +79,7 @@ import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.Webs;
 import com.microsoft.schemas.sharepoint.soap.Xml;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.Authenticator;
@@ -1587,8 +1588,11 @@ class SharePointRepository implements Repository {
       log.fine("Parent list item has no child attachments");
       return ApiOperations.deleteItem(polledItem.getName());
     }
+
+    String attachmentUrl = itemObject.getUrl();
     IndexingItemBuilder itemBuilder = IndexingItemBuilder.fromConfiguration(polledItem.getName());
-    AbstractInputStreamContent content = getFileContent(polledItem.getName(), itemBuilder, false);
+    itemBuilder.setTitle(withValue(getFileNameFromUrl(attachmentUrl)));
+    AbstractInputStreamContent content = getFileContent(attachmentUrl, itemBuilder, false);
     String parentItem = getUniqueIdFromRow(row);
     Acl acl =
         new Acl.Builder()
@@ -1604,6 +1608,10 @@ class SharePointRepository implements Repository {
         .setItem(itemBuilder.build())
         .setContent(content, ContentFormat.RAW)
         .build();
+  }
+
+  private static String getFileNameFromUrl(String url) {
+    return new File(url).getName();
   }
 
   private Map<String, PushItem> getChildListEntries(

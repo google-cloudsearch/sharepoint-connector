@@ -1307,7 +1307,8 @@ public class SharePointRepositoryTest {
                     "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf"))
             .setContainerName(FieldOrValue.withValue("{E7156244-AC2F-4402-AA74-7A365726CD02}"))
             .setPayload(payloadItem.encodePayload())
-            .setItemType(ItemType.CONTENT_ITEM);
+            .setItemType(ItemType.CONTENT_ITEM)
+            .setTitle(FieldOrValue.withValue("attach.pdf"));
 
     RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
     expectedDoc.setContent(ByteArrayContent.fromString(null, "attachment"), ContentFormat.RAW);
