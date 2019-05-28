@@ -599,6 +599,72 @@ public class SharePointRepositoryTest {
     ApiOperation actual = repo.getDoc(entry);
     assertEquals(expectedDoc.build(), actual);
   }
+  
+  @Test
+  public void testGetWebDocContentWithSpace() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/another subsite",
+        "http://localhost:1",
+        "http://localhost:1/another subsite",
+        0);
+    SiteDataClient subSiteDataClient = Mockito.mock(SiteDataClient.class);
+    SiteConnector scSubSite =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1/another subsite")
+            .setSiteDataClient(subSiteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance(
+            "http://localhost:1", "http://localhost:1/another subsite"))
+        .thenReturn(scSubSite);
+
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String currentWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll(
+            "/sites/SiteCollection", "/another subsite");
+    Web web = SiteDataClient.jaxbParse(currentWeb, Web.class, false);
+    when(subSiteDataClient.getContentWeb()).thenReturn(web);
+    SharePointObject webPayload =
+        new SharePointObject.Builder(SharePointObject.WEB)
+            .setUrl("http://localhost:1/another subsite")
+            .setObjectId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .build();
+    Item entry =
+        new Item().setName("http://localhost:1/another subsite")
+        .encodePayload(webPayload.encodePayload());
+    Map<String, PushItem> childEntries = getChildEntriesForWeb(
+        "http://localhost:1/another subsite");
+    Item webItem = getWebItem(
+            "http://localhost:1/another subsite",
+            "http://localhost:1",
+            "http://localhost:1",
+            true);
+    webItem.getMetadata().setTitle("chinese1");
+    webItem.getMetadata().setSourceRepositoryUrl("http://localhost:1/another%20subsite");
+    webItem.encodePayload(webPayload.encodePayload());
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(webItem);
+    childEntries.entrySet().stream().forEach(e -> expectedDoc.addChildId(e.getKey(), e.getValue()));
+    ApiOperation actual = repo.getDoc(entry);
+    assertEquals(expectedDoc.build(), actual);
+  }
 
   @Test
   public void testGetWebDocContentNoIndex() throws IOException {
@@ -706,7 +772,7 @@ public class SharePointRepositoryTest {
                     .setInheritFrom("http://localhost:1")
                     .build())
             .setSourceRepositoryUrl(
-                FieldOrValue.withValue("http://localhost:1/Lists/Custom List/AllItems.aspx"))
+                FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/AllItems.aspx"))
             .setContainerName(FieldOrValue.withValue("http://localhost:1"))
             .setUpdateTime(
                 FieldOrValue.withValue(
@@ -1304,7 +1370,7 @@ public class SharePointRepositoryTest {
                     .build())
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue(
-                    "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf"))
+                    "http://localhost:1/Lists/Custom%20List/Attachments/2/attach.pdf"))
             .setContainerName(FieldOrValue.withValue("{E7156244-AC2F-4402-AA74-7A365726CD02}"))
             .setPayload(payloadItem.encodePayload())
             .setItemType(ItemType.CONTENT_ITEM)

@@ -49,6 +49,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
+import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
 import com.google.enterprise.cloudsearch.sdk.indexing.StructuredData;
@@ -1192,7 +1193,8 @@ class SharePointRepository implements Repository {
     item.setItemType(ItemType.CONTAINER_ITEM);
     item.setPayload(polledItem.decodePayload());
     item.setTitle(withValue(rootWeb.getMetadata().getTitle()));
-    item.setSourceRepositoryUrl(withValue(scConnector.encodeDocId(rootWeb.getMetadata().getURL())));
+    item.setSourceRepositoryUrl(
+        getNormalizedSourceRepositoryUrl(scConnector.encodeDocId(rootWeb.getMetadata().getURL())));
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder().setItem(item.build());
     addChildIdsToRepositoryDoc(
         doc, getChildWebEntries(scConnector, site.getMetadata().getID(), rootWeb));
@@ -1232,7 +1234,8 @@ class SharePointRepository implements Repository {
             .setPayload(polledItem.decodePayload())
             .setTitle(withValue(currentWeb.getMetadata().getTitle()))
             .setSourceRepositoryUrl(
-                withValue(scConnector.encodeDocId(currentWeb.getMetadata().getURL())))
+                getNormalizedSourceRepositoryUrl(
+                    scConnector.encodeDocId(currentWeb.getMetadata().getURL())))
             .setItemType(ItemType.CONTAINER_ITEM);
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder();
     addChildIdsToRepositoryDoc(
@@ -1290,7 +1293,7 @@ class SharePointRepository implements Repository {
             ? l.getMetadata().getRootFolder()
             : l.getMetadata().getDefaultViewUrl();
     String displayUrl = scConnector.encodeDocId(path);
-    listItemBuilder.setSourceRepositoryUrl(withValue(displayUrl));
+    listItemBuilder.setSourceRepositoryUrl(getNormalizedSourceRepositoryUrl(displayUrl));
 
     String lastModified = l.getMetadata().getLastModified();
     if (!Strings.isNullOrEmpty(lastModified)) {
@@ -1482,7 +1485,7 @@ class SharePointRepository implements Repository {
                 displayPage.getPath(),
                 "RootFolder=" + serverUrl,
                 null);
-        itemBuilder.setSourceRepositoryUrl(withValue(displayUrl.toString()));
+        itemBuilder.setSourceRepositoryUrl(getNormalizedSourceRepositoryUrl(displayUrl.toString()));
       } catch (URISyntaxException ex) {
         throw new IOException(ex);
       }
@@ -1520,7 +1523,8 @@ class SharePointRepository implements Repository {
                 displayPage.getPath(),
                 "ID=" + itemId.value,
                 null);
-        itemBuilder.setSourceRepositoryUrl(withValue(viewItemUri.toString()));
+        itemBuilder.setSourceRepositoryUrl(
+            getNormalizedSourceRepositoryUrl(viewItemUri.toString()));
       } catch (URISyntaxException e) {
         throw new IOException(e);
       }
@@ -1738,7 +1742,7 @@ class SharePointRepository implements Repository {
     } catch (URISyntaxException e) {
       throw new IOException(e);
     }
-    item.setSourceRepositoryUrl(withValue(fileUrl));
+    item.setSourceRepositoryUrl(getNormalizedSourceRepositoryUrl(fileUrl));
     String filePath = sharepointFileUrl.getURI().getPath();
     String fileExtension = "";
     if (filePath.lastIndexOf('.') > 0) {
@@ -1968,6 +1972,17 @@ class SharePointRepository implements Repository {
    */
   private static String getNormalizedPropertyName(String displayName) {
     return displayName.replaceAll("[^A-Za-z0-9]", "");
+  }
+
+  /**
+   * SharePoint URLs may contain one or more whitespace characters. This breaks URL redirect from
+   * search results. Encoding whitespace as %20 to comply with URL specifications.
+   *
+   * @param url URL to normalize
+   * @return normalized source repository URL
+   */
+  private static FieldOrValue<String> getNormalizedSourceRepositoryUrl(String url) {
+    return withValue(url.replace(" ", "%20"));
   }
 
   private static class InternalUrl {
