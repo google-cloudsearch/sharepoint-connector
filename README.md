@@ -7,18 +7,20 @@ the [graph traversal strategy](https://developers.google.com/cloud-search/docs/g
 
 ## Build instructions
 
-1. Clone the connector repository from GitHub:
-   ```
-   git clone https://github.com/google-cloudsearch/sharepoint-connector.git
-   cd sharepoint-connector
-   ```
+1. Build the connector
 
-2. Checkout the desired version of the connector and build the ZIP file:
-   ```
-   git checkout tags/v1-0.0.4
-   mvn package
-   ```
-   (To skip the tests when building the connector, use `mvn package -DskipTests`)
+   a. Clone the connector repository from GitHub:
+      ```
+      git clone https://github.com/google-cloudsearch/sharepoint-connector.git
+      cd sharepoint-connector
+      ```
+
+   b. Checkout the desired version of the connector and build the ZIP file:
+      ```
+      git checkout tags/v1-0.0.5
+      mvn package
+      ```
+      (To skip the tests when building the connector, use `mvn package -DskipTests`)
 
 For further information on configuration and deployment of this connector, see
 [Deploy the Microsoft SharePoint On-Prem Connector](https://developers.google.com/cloud-search/docs/guides/sharepoint-on-prem-connector)
