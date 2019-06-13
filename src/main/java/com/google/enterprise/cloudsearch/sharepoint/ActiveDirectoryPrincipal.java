@@ -18,8 +18,9 @@ package com.google.enterprise.cloudsearch.sharepoint;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
-import com.google.common.base.Objects;
 import com.google.common.base.Strings;
+import java.util.Objects;
+
 /** Class to parse active directory principals and format conversion */
 class ActiveDirectoryPrincipal {
   static enum PrincipalFormat {
@@ -100,7 +101,7 @@ class ActiveDirectoryPrincipal {
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(name, domain, format);
+    return Objects.hash(name, domain, format);
   }
 
   @Override
@@ -113,9 +114,9 @@ class ActiveDirectoryPrincipal {
       return false;
     }
     ActiveDirectoryPrincipal other = (ActiveDirectoryPrincipal) obj;
-    return Objects.equal(name, other.name)
-        && Objects.equal(domain, other.domain)
-        && Objects.equal(format, other.format);
+    return Objects.equals(name, other.name)
+        && Objects.equals(domain, other.domain)
+        && Objects.equals(format, other.format);
   }
 
   @Override
