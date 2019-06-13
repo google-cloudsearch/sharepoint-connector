@@ -20,7 +20,6 @@ import static com.google.common.base.Preconditions.checkState;
 
 import com.google.api.client.http.AbstractInputStreamContent;
 import com.google.api.client.http.ByteArrayContent;
-import com.google.api.client.repackaged.com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
 import java.io.IOException;
@@ -28,6 +27,7 @@ import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
@@ -72,7 +72,7 @@ class HtmlContentFilter {
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(filters);
+    return Objects.hash(filters);
   }
 
   @Override
@@ -84,6 +84,6 @@ class HtmlContentFilter {
       return false;
     }
     HtmlContentFilter other = (HtmlContentFilter) obj;
-    return Objects.equal(filters, other.filters);
+    return Objects.equals(filters, other.filters);
   }
 }
