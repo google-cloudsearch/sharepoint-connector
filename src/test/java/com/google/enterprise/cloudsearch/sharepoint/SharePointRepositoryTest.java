@@ -599,6 +599,72 @@ public class SharePointRepositoryTest {
     ApiOperation actual = repo.getDoc(entry);
     assertEquals(expectedDoc.build(), actual);
   }
+  
+  @Test
+  public void testGetWebDocContentWithSpace() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    repo.init(repoContext);
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/another subsite",
+        "http://localhost:1",
+        "http://localhost:1/another subsite",
+        0);
+    SiteDataClient subSiteDataClient = Mockito.mock(SiteDataClient.class);
+    SiteConnector scSubSite =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1/another subsite")
+            .setSiteDataClient(subSiteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance(
+            "http://localhost:1", "http://localhost:1/another subsite"))
+        .thenReturn(scSubSite);
+
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String currentWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll(
+            "/sites/SiteCollection", "/another subsite");
+    Web web = SiteDataClient.jaxbParse(currentWeb, Web.class, false);
+    when(subSiteDataClient.getContentWeb()).thenReturn(web);
+    SharePointObject webPayload =
+        new SharePointObject.Builder(SharePointObject.WEB)
+            .setUrl("http://localhost:1/another subsite")
+            .setObjectId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .build();
+    Item entry =
+        new Item().setName("http://localhost:1/another subsite")
+        .encodePayload(webPayload.encodePayload());
+    Map<String, PushItem> childEntries = getChildEntriesForWeb(
+        "http://localhost:1/another subsite");
+    Item webItem = getWebItem(
+            "http://localhost:1/another subsite",
+            "http://localhost:1",
+            "http://localhost:1",
+            true);
+    webItem.getMetadata().setTitle("chinese1");
+    webItem.getMetadata().setSourceRepositoryUrl("http://localhost:1/another%20subsite");
+    webItem.encodePayload(webPayload.encodePayload());
+    RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(webItem);
+    childEntries.entrySet().stream().forEach(e -> expectedDoc.addChildId(e.getKey(), e.getValue()));
+    ApiOperation actual = repo.getDoc(entry);
+    assertEquals(expectedDoc.build(), actual);
+  }
 
   @Test
   public void testGetWebDocContentNoIndex() throws IOException {
@@ -706,8 +772,8 @@ public class SharePointRepositoryTest {
                     .setInheritFrom("http://localhost:1")
                     .build())
             .setSourceRepositoryUrl(
-                FieldOrValue.withValue("http://localhost:1/Lists/Custom List/AllItems.aspx"))
-            .setContainerName("http://localhost:1")
+                FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/AllItems.aspx"))
+            .setContainerName(FieldOrValue.withValue("http://localhost:1"))
             .setUpdateTime(
                 FieldOrValue.withValue(
                     getParsedDateTime(
@@ -840,7 +906,7 @@ public class SharePointRepositoryTest {
                     .build())
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setContainerName(FieldOrValue.withValue("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}"))
             .setUpdateTime(
                 FieldOrValue.withValue(
                     getParsedDateTime(
@@ -852,7 +918,7 @@ public class SharePointRepositoryTest {
                         SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
                         "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
-            .setObjectType("Item")
+            .setObjectType(FieldOrValue.withValue("Item"))
             .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
 
@@ -987,7 +1053,7 @@ public class SharePointRepositoryTest {
                 FieldOrValue.withValue(
                     "http://localhost:1/Lists/Custom%20List/AllItems.aspx?"
                         + "RootFolder=/Lists/Custom%20List/Sub=Folder"))
-            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setContainerName(FieldOrValue.withValue("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}"))
             .setUpdateTime(
                 FieldOrValue.withValue(
                     getParsedDateTime(
@@ -999,7 +1065,7 @@ public class SharePointRepositoryTest {
                         SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
                         "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
-            .setObjectType("Item")
+            .setObjectType(FieldOrValue.withValue("Item"))
             .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
 
@@ -1124,7 +1190,7 @@ public class SharePointRepositoryTest {
                     .build())
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setContainerName(FieldOrValue.withValue("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}"))
             .setUpdateTime(
                 FieldOrValue.withValue(
                     getParsedDateTime(
@@ -1136,7 +1202,7 @@ public class SharePointRepositoryTest {
                         SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
                         "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
-            .setObjectType("Item")
+            .setObjectType(FieldOrValue.withValue("Item"))
             .setTitle(FieldOrValue.withValue("2_.000")) // ows_FileLeafRef has display name "Name"
             .setItemType(ItemType.CONTAINER_ITEM);
 
@@ -1304,10 +1370,11 @@ public class SharePointRepositoryTest {
                     .build())
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue(
-                    "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf"))
-            .setContainerName("{E7156244-AC2F-4402-AA74-7A365726CD02}")
+                    "http://localhost:1/Lists/Custom%20List/Attachments/2/attach.pdf"))
+            .setContainerName(FieldOrValue.withValue("{E7156244-AC2F-4402-AA74-7A365726CD02}"))
             .setPayload(payloadItem.encodePayload())
-            .setItemType(ItemType.CONTENT_ITEM);
+            .setItemType(ItemType.CONTENT_ITEM)
+            .setTitle(FieldOrValue.withValue("attach.pdf"));
 
     RepositoryDoc.Builder expectedDoc = new RepositoryDoc.Builder().setItem(itemBuilder.build());
     expectedDoc.setContent(ByteArrayContent.fromString(null, "attachment"), ContentFormat.RAW);
@@ -1390,7 +1457,7 @@ public class SharePointRepositoryTest {
                     .build())
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setContainerName(FieldOrValue.withValue("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}"))
             .setUpdateTime(
                 FieldOrValue.withValue(
                     getParsedDateTime(
@@ -1402,7 +1469,7 @@ public class SharePointRepositoryTest {
                         SharePointRepository.CREATED_DATE_LIST_ITEM_FORMAT,
                         "2012-05-01T22:14:06Z")))
             .setPayload(payloadItem.encodePayload())
-            .setObjectType("AnotherContentType")
+            .setObjectType(FieldOrValue.withValue("AnotherContentType"))
             .setTitle(FieldOrValue.withValue("Inside Folder"))
             .setItemType(ItemType.CONTAINER_ITEM);
 
@@ -1504,7 +1571,7 @@ public class SharePointRepositoryTest {
                     .build())
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setContainerName(FieldOrValue.withValue("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}"))
             .setUpdateTime(
                 FieldOrValue.withValue(
                     getParsedDateTime(
@@ -1604,7 +1671,7 @@ public class SharePointRepositoryTest {
                     .build())
             .setSourceRepositoryUrl(
                 FieldOrValue.withValue("http://localhost:1/Lists/Custom%20List/DispForm.aspx?ID=2"))
-            .setContainerName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setContainerName(FieldOrValue.withValue("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}"))
             .setUpdateTime(
                 FieldOrValue.withValue(
                     getParsedDateTime(

@@ -49,6 +49,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
+import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingService.ContentFormat;
 import com.google.enterprise.cloudsearch.sdk.indexing.StructuredData;
@@ -79,6 +80,7 @@ import com.microsoft.schemas.sharepoint.soap.VirtualServer;
 import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.Webs;
 import com.microsoft.schemas.sharepoint.soap.Xml;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.Authenticator;
@@ -1179,7 +1181,7 @@ class SharePointRepository implements Repository {
     batchRequest.add(adminFragment);
     IndexingItemBuilder item = IndexingItemBuilder.fromConfiguration(polledItem.getName());
     if (!sharepointConfiguration.isSiteCollectionUrl()) {
-      item.setContainerName(VIRTUAL_SERVER_ID);
+      item.setContainerName(withValue(VIRTUAL_SERVER_ID));
     }
     Acl itemAcl =
         new Acl.Builder()
@@ -1191,7 +1193,8 @@ class SharePointRepository implements Repository {
     item.setItemType(ItemType.CONTAINER_ITEM);
     item.setPayload(polledItem.decodePayload());
     item.setTitle(withValue(rootWeb.getMetadata().getTitle()));
-    item.setSourceRepositoryUrl(withValue(scConnector.encodeDocId(rootWeb.getMetadata().getURL())));
+    item.setSourceRepositoryUrl(
+        getNormalizedSourceRepositoryUrl(scConnector.encodeDocId(rootWeb.getMetadata().getURL())));
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder().setItem(item.build());
     addChildIdsToRepositoryDoc(
         doc, getChildWebEntries(scConnector, site.getMetadata().getID(), rootWeb));
@@ -1227,11 +1230,12 @@ class SharePointRepository implements Repository {
     IndexingItemBuilder item =
         IndexingItemBuilder.fromConfiguration(polledItem.getName())
             .setAcl(aclBuilder.build())
-            .setContainerName(parentWebUrl)
+            .setContainerName(withValue(parentWebUrl))
             .setPayload(polledItem.decodePayload())
             .setTitle(withValue(currentWeb.getMetadata().getTitle()))
             .setSourceRepositoryUrl(
-                withValue(scConnector.encodeDocId(currentWeb.getMetadata().getURL())))
+                getNormalizedSourceRepositoryUrl(
+                    scConnector.encodeDocId(currentWeb.getMetadata().getURL())))
             .setItemType(ItemType.CONTAINER_ITEM);
     RepositoryDoc.Builder doc = new RepositoryDoc.Builder();
     addChildIdsToRepositoryDoc(
@@ -1279,7 +1283,7 @@ class SharePointRepository implements Repository {
 
     IndexingItemBuilder listItemBuilder =
         IndexingItemBuilder.fromConfiguration(polledItem.getName())
-            .setContainerName(scConnector.getWebUrl())
+            .setContainerName(withValue(scConnector.getWebUrl()))
             .setAcl(listAcl.build())
             .setItemType(ItemType.CONTAINER_ITEM)
             .setPayload(listObject.encodePayload());
@@ -1289,7 +1293,7 @@ class SharePointRepository implements Repository {
             ? l.getMetadata().getRootFolder()
             : l.getMetadata().getDefaultViewUrl();
     String displayUrl = scConnector.encodeDocId(path);
-    listItemBuilder.setSourceRepositoryUrl(withValue(displayUrl));
+    listItemBuilder.setSourceRepositoryUrl(getNormalizedSourceRepositoryUrl(displayUrl));
 
     String lastModified = l.getMetadata().getLastModified();
     if (!Strings.isNullOrEmpty(lastModified)) {
@@ -1380,7 +1384,7 @@ class SharePointRepository implements Repository {
     String possibleAclParent;
     if (parentIsList) {
       parentScopeId = listScopeId;
-      itemBuilder.setContainerName(l.getMetadata().getID());
+      itemBuilder.setContainerName(withValue(l.getMetadata().getID()));
       possibleAclParent = l.getMetadata().getID();
     } else {
       // If current item has same scope id as list then inheritance is not
@@ -1416,7 +1420,7 @@ class SharePointRepository implements Repository {
       parentScopeId =
           getValueFromIdPrefixedField(folderRow, OWS_SCOPEID_ATTRIBUTE).toLowerCase(Locale.ENGLISH);
       String folderObjectId = getUniqueIdFromRow(folderRow);
-      itemBuilder.setContainerName(folderObjectId);
+      itemBuilder.setContainerName(withValue(folderObjectId));
       possibleAclParent = folderObjectId;
     }
     Acl.Builder aclBuilder = new Acl.Builder().setInheritanceType(InheritanceType.PARENT_OVERRIDE);
@@ -1451,7 +1455,7 @@ class SharePointRepository implements Repository {
     String contentType = row.getAttribute(OWS_CONTENTTYPE_ATTRIBUTE);
     String objectType = contentType == null ? "" : getNormalizedObjectType(contentType);
     if (!Strings.isNullOrEmpty(objectType) && StructuredData.hasObjectDefinition(objectType)) {
-      itemBuilder.setObjectType(objectType);
+      itemBuilder.setObjectType(withValue(objectType));
     }
     itemBuilder.setValues(extractedMetadataValues);
     if (isFolder) {
@@ -1481,7 +1485,7 @@ class SharePointRepository implements Repository {
                 displayPage.getPath(),
                 "RootFolder=" + serverUrl,
                 null);
-        itemBuilder.setSourceRepositoryUrl(withValue(displayUrl.toString()));
+        itemBuilder.setSourceRepositoryUrl(getNormalizedSourceRepositoryUrl(displayUrl.toString()));
       } catch (URISyntaxException ex) {
         throw new IOException(ex);
       }
@@ -1519,7 +1523,8 @@ class SharePointRepository implements Repository {
                 displayPage.getPath(),
                 "ID=" + itemId.value,
                 null);
-        itemBuilder.setSourceRepositoryUrl(withValue(viewItemUri.toString()));
+        itemBuilder.setSourceRepositoryUrl(
+            getNormalizedSourceRepositoryUrl(viewItemUri.toString()));
       } catch (URISyntaxException e) {
         throw new IOException(e);
       }
@@ -1587,8 +1592,11 @@ class SharePointRepository implements Repository {
       log.fine("Parent list item has no child attachments");
       return ApiOperations.deleteItem(polledItem.getName());
     }
+
+    String attachmentUrl = itemObject.getUrl();
     IndexingItemBuilder itemBuilder = IndexingItemBuilder.fromConfiguration(polledItem.getName());
-    AbstractInputStreamContent content = getFileContent(polledItem.getName(), itemBuilder, false);
+    itemBuilder.setTitle(withValue(getFileNameFromUrl(attachmentUrl)));
+    AbstractInputStreamContent content = getFileContent(attachmentUrl, itemBuilder, false);
     String parentItem = getUniqueIdFromRow(row);
     Acl acl =
         new Acl.Builder()
@@ -1598,12 +1606,16 @@ class SharePointRepository implements Repository {
     itemBuilder
         .setAcl(acl)
         .setPayload(polledItem.decodePayload())
-        .setContainerName(parentItem)
+        .setContainerName(withValue(parentItem))
         .setItemType(ItemType.CONTENT_ITEM);
     return new RepositoryDoc.Builder()
         .setItem(itemBuilder.build())
         .setContent(content, ContentFormat.RAW)
         .build();
+  }
+
+  private static String getFileNameFromUrl(String url) {
+    return new File(url).getName();
   }
 
   private Map<String, PushItem> getChildListEntries(
@@ -1730,7 +1742,7 @@ class SharePointRepository implements Repository {
     } catch (URISyntaxException e) {
       throw new IOException(e);
     }
-    item.setSourceRepositoryUrl(withValue(fileUrl));
+    item.setSourceRepositoryUrl(getNormalizedSourceRepositoryUrl(fileUrl));
     String filePath = sharepointFileUrl.getURI().getPath();
     String fileExtension = "";
     if (filePath.lastIndexOf('.') > 0) {
@@ -1744,7 +1756,7 @@ class SharePointRepository implements Repository {
           Level.FINER,
           "Overriding content type as {0} for file extension {1}",
           new Object[] {contentType, fileExtension});
-      item.setMimeType(contentType);
+      item.setMimeType(withValue(contentType));
     } else {
       contentType = fi.getFirstHeaderWithName("Content-Type");
       if (contentType != null) {
@@ -1752,7 +1764,7 @@ class SharePointRepository implements Repository {
         if (MIME_TYPE_MAPPING.containsKey(lowerType)) {
           contentType = MIME_TYPE_MAPPING.get(lowerType);
         }
-        item.setMimeType(contentType);
+        item.setMimeType(withValue(contentType));
       }
     }
     String lastModifiedString = fi.getFirstHeaderWithName("Last-Modified");
@@ -1960,6 +1972,17 @@ class SharePointRepository implements Repository {
    */
   private static String getNormalizedPropertyName(String displayName) {
     return displayName.replaceAll("[^A-Za-z0-9]", "");
+  }
+
+  /**
+   * SharePoint URLs may contain one or more whitespace characters. This breaks URL redirect from
+   * search results. Encoding whitespace as %20 to comply with URL specifications.
+   *
+   * @param url URL to normalize
+   * @return normalized source repository URL
+   */
+  private static FieldOrValue<String> getNormalizedSourceRepositoryUrl(String url) {
+    return withValue(url.replace(" ", "%20"));
   }
 
   private static class InternalUrl {
