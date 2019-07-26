@@ -18,7 +18,9 @@ package com.google.enterprise.cloudsearch.sharepoint;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.hasItem;
+import static org.hamcrest.CoreMatchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -66,6 +68,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate.UnmappedColumnsMode;
+import com.google.enterprise.cloudsearch.sdk.indexing.DefaultAcl.DefaultAclMode;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
@@ -91,6 +94,7 @@ import com.microsoft.schemas.sharepoint.soap.Web;
 import com.microsoft.schemas.sharepoint.soap.directory.UserGroupSoap;
 import com.microsoft.schemas.sharepoint.soap.people.PeopleSoap;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -106,6 +110,10 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Handler;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
+import java.util.logging.StreamHandler;
 import javax.xml.ws.Holder;
 import org.junit.Before;
 import org.junit.Rule;
@@ -339,6 +347,38 @@ public class SharePointRepositoryTest {
         .setSharePointDeploymentType(SharePointDeploymentType.ONLINE);
     inOrder.verify(siteConnectorFactoryBuilder).build();
     verifyNoMoreInteractions(httpClientBuilder, siteConnectorFactoryBuilder);
+  }
+
+  @Test
+  public void testInitAclMode_Fallback() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    Logger log = Logger.getLogger(SharePointRepository.class.getName());
+    ByteArrayOutputStream logStream = new ByteArrayOutputStream();
+    Handler logHandler = new StreamHandler(logStream, new SimpleFormatter());
+    log.addHandler(logHandler);
+    when(repoContext.getDefaultAclMode()).thenReturn(DefaultAclMode.FALLBACK);
+
+    repo.init(repoContext);
+
+    logHandler.flush();
+    assertThat(logStream.toString(),
+        containsString("The default ACL in FALLBACK mode will be ignored."));
+  }
+
+  @Test
+  public void testInitAclMode_nonFallback() throws IOException {
+    SharePointRepository repo = setUpDefaultRepository();
+    Logger log = Logger.getLogger(SharePointRepository.class.getName());
+    ByteArrayOutputStream logStream = new ByteArrayOutputStream();
+    Handler logHandler = new StreamHandler(logStream, new SimpleFormatter());
+    log.addHandler(logHandler);
+    when(repoContext.getDefaultAclMode()).thenReturn(DefaultAclMode.OVERRIDE);
+
+    repo.init(repoContext);
+
+    logHandler.flush();
+    assertThat("Should not contain FALLBACK", logStream.toString(),
+        not(containsString("FALLBACK")));
   }
 
   @Test

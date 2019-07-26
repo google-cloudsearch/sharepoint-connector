@@ -48,6 +48,7 @@ import com.google.enterprise.cloudsearch.sdk.config.Configuration;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
+import com.google.enterprise.cloudsearch.sdk.indexing.DefaultAcl.DefaultAclMode;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
@@ -386,6 +387,9 @@ class SharePointRepository implements Repository {
     initIncrementalCheckpoint = computeIncrementalCheckpoint();
     listItemContentTemplate = ContentTemplate.fromConfiguration("sharepointItem");
     htmlContentFilter = HtmlContentFilter.fromConfiguration();
+    if (repositoryContext.getDefaultAclMode() == DefaultAclMode.FALLBACK) {
+      log.log(Level.WARNING, "The default ACL in FALLBACK mode will be ignored.");
+    }
   }
 
   @Override
