@@ -20,6 +20,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.hasItem;
+import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -77,6 +78,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.StructuredData;
 import com.google.enterprise.cloudsearch.sdk.indexing.StructuredData.ResetStructuredDataRule;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.ApiOperations;
+import com.google.enterprise.cloudsearch.sdk.indexing.template.BatchApiOperation;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.PushItems;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryContext;
 import com.google.enterprise.cloudsearch.sdk.indexing.template.RepositoryDoc;
@@ -1816,6 +1818,376 @@ public class SharePointRepositoryTest {
   }
 
   @Test
+  public void getDoc_includeExcludeFilter_siteCollection_include() throws IOException {
+    getDoc_includeExcludeFilter_siteCollection("INCLUDE");
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_siteCollection_exclude() throws IOException {
+    getDoc_includeExcludeFilter_siteCollection("EXCLUDE");
+  }
+
+  private void getDoc_includeExcludeFilter_siteCollection(String action) throws IOException {
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .setReferenceIdentitySourceConfiguration(
+                ImmutableMap.of(
+                    "GDC-PSL", new IdentitySourceConfiguration.Builder("idSourceGdcPsl").build()))
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb("http://localhost:1", "http://localhost:1", "http://localhost:1", 0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    SharePointObject siteCollectionPayload =
+        new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+            .setUrl("http://localhost:1")
+            .setObjectId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .build();
+    Item entry =
+        new Item()
+            .setName("http://localhost:1")
+            .encodePayload(siteCollectionPayload.encodePayload());
+
+    Properties config = getBaseConfig();
+    config.put("includeExcludeFilter.ruleName.action", action);
+    config.put("includeExcludeFilter.ruleName.filterType", "URL_PREFIX");
+    config.put("includeExcludeFilter.ruleName.filterPattern",
+        "http://localhost:1/");
+
+    SharePointRepository repo = setUpDefaultRepository(config);
+    repo.init(repoContext);
+
+    ApiOperation actual = repo.getDoc(entry);
+    if (action.equals("INCLUDE")) {
+      assertThat(actual, instanceOf(BatchApiOperation.class));
+    } else {
+      assertEquals(ApiOperations.deleteItem("http://localhost:1"), actual);
+    }
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_web_include() throws IOException {
+    getDoc_includeExcludeFilter_web("INCLUDE");
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_web_exclude() throws IOException {
+    getDoc_includeExcludeFilter_web("EXCLUDE");
+  }
+
+  private void getDoc_includeExcludeFilter_web(String action) throws IOException {
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/subsite", "http://localhost:1", "http://localhost:1/subsite", 0);
+    SiteDataClient subSiteDataClient = Mockito.mock(SiteDataClient.class);
+    SiteConnector scSubSite =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1/subsite")
+            .setSiteDataClient(subSiteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1/subsite"))
+        .thenReturn(scSubSite);
+
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String currentWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "/subsite");
+    Web web = SiteDataClient.jaxbParse(currentWeb, Web.class, false);
+    when(subSiteDataClient.getContentWeb()).thenReturn(web);
+    SharePointObject webPayload =
+        new SharePointObject.Builder(SharePointObject.WEB)
+            .setUrl("http://localhost:1/subsite")
+            .setObjectId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .build();
+    Item entry =
+        new Item().setName("http://localhost:1/subsite").encodePayload(webPayload.encodePayload());
+
+    Properties config = getBaseConfig();
+    config.put("includeExcludeFilter.ruleName.action", action);
+    config.put("includeExcludeFilter.ruleName.filterType", "URL_PREFIX");
+    config.put("includeExcludeFilter.ruleName.filterPattern",
+        "http://localhost:1/subsite");
+
+    SharePointRepository repo = setUpDefaultRepository(config);
+    repo.init(repoContext);
+
+    ApiOperation actual = repo.getDoc(entry);
+    if (action.equals("INCLUDE")) {
+      assertEquals("http://localhost:1/subsite",
+          ((RepositoryDoc) actual).getItem().getName());
+    } else {
+      assertEquals(ApiOperations.deleteItem("http://localhost:1/subsite"), actual);
+    }
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_listItem_include() throws Exception {
+    getDoc_includeExcludeFilter_listItem("INCLUDE");
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_listItem_exclude() throws Exception {
+    getDoc_includeExcludeFilter_listItem("EXCLUDE");
+  }
+
+  private void getDoc_includeExcludeFilter_listItem(String action) throws Exception {
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "http://localhost:1",
+        "http://localhost:1",
+        0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String listResponse =
+        SharePointResponseHelper.getListResponse()
+            .replaceAll("/sites/SiteCollection", "")
+            .replace(
+                "ScopeID=\"{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}\"",
+                "ScopeID=\"{2e29615c-59e7-493b-b08a-3642949cc069}\"");
+    setupList(listResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}");
+    SharePointObject payloadItem =
+        new SharePointObject.Builder(SharePointObject.LIST_ITEM)
+            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setUrl("http://localhost:1/Lists/Custom List/2_.000")
+            .setObjectId("item")
+            .build();
+    setupUrlSegments(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}",
+        "2");
+    String listItemResponse = SharePointResponseHelper.getListItemResponse();
+    listItemResponse =
+        listItemResponse
+            .replaceAll("/Test Folder", "")
+            .replaceAll("/Test%20Folder", "")
+            .replaceAll("/sites/SiteCollection", "")
+            .replaceAll("sites/SiteCollection/", "")
+            .replaceAll("ows_Attachments='1'", "ows_Attachments='0'");
+    setupListItem(listItemResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "2");
+    Item entry =
+        new Item()
+            .setName("{E7156244-AC2F-4402-AA74-7A365726CD02}")
+            .encodePayload(payloadItem.encodePayload());
+
+    Properties config = getBaseConfig();
+    config.put("includeExcludeFilter.ruleName.action", action);
+    config.put("includeExcludeFilter.ruleName.filterType", "URL_PREFIX");
+    config.put("includeExcludeFilter.ruleName.filterPattern",
+        "http://localhost:1/Lists/Custom List");
+
+    SharePointRepository repo = setUpDefaultRepository(config);
+    repo.init(repoContext);
+
+    ApiOperation actual = repo.getDoc(entry);
+    if (action.equals("INCLUDE")) {
+      assertEquals("{E7156244-AC2F-4402-AA74-7A365726CD02}",
+          ((RepositoryDoc) actual).getItem().getName());
+    } else {
+      assertEquals(ApiOperations.deleteItem("{E7156244-AC2F-4402-AA74-7A365726CD02}"), actual);
+    }
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_list_include() throws Exception {
+    getDoc_includeExcludeFilter_list("INCLUDE");
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_list_exclude() throws Exception {
+    getDoc_includeExcludeFilter_list("EXCLUDE");
+  }
+
+  private void getDoc_includeExcludeFilter_list(String action) throws Exception {
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/Lists/Custom List/AllItems.aspx",
+        "http://localhost:1",
+        "http://localhost:1",
+        0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String listResponse =
+        SharePointResponseHelper.getListResponse()
+            .replaceAll("/sites/SiteCollection", "")
+            .replace(
+                "ScopeID=\"{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}\"",
+                "ScopeID=\"{01abac8c-66c8-4fed-829c-8dd02bbf40dd}\"");
+    setupList(listResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}");
+    String listRootFolderResponse =
+        SharePointResponseHelper.getListRootFolderContentResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupFolder(listRootFolderResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "");
+    SharePointObject listPayload =
+        new SharePointObject.Builder(SharePointObject.LIST)
+            .setUrl("http://localhost:1/Lists/Custom List/AllItems.aspx")
+            .setObjectId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .build();
+    Item entry =
+        new Item()
+            .setName("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .encodePayload(listPayload.encodePayload());
+
+    Properties config = getBaseConfig();
+    config.put("includeExcludeFilter.ruleName.action", action);
+    config.put("includeExcludeFilter.ruleName.filterType", "URL_PREFIX");
+    config.put("includeExcludeFilter.ruleName.filterPattern",
+        "http://localhost:1/Lists/Custom List");
+
+    SharePointRepository repo = setUpDefaultRepository(config);
+    repo.init(repoContext);
+    ApiOperation actual = repo.getDoc(entry);
+    if (action.equals("INCLUDE")) {
+      assertEquals("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}",
+          ((RepositoryDoc) actual).getItem().getName());
+    } else {
+      assertEquals(ApiOperations.deleteItem("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}"), actual);
+    }
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_attachment_include() throws IOException {
+    getDoc_includeExcludeFilter_attachment("INCLUDE");
+  }
+
+  @Test
+  public void getDoc_includeExcludeFilter_attachment_exclude() throws IOException {
+    getDoc_includeExcludeFilter_attachment("EXCLUDE");
+  }
+
+  private void getDoc_includeExcludeFilter_attachment(String action) throws IOException {
+    SiteConnector scRoot =
+        new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+            .setSiteDataClient(siteDataClient)
+            .setPeople(peopleSoap)
+            .setUserGroup(userGroupSoap)
+            .build();
+    when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+        .thenReturn(scRoot);
+    setupGetSiteAndWeb(
+        "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf",
+        "http://localhost:1",
+        "http://localhost:1",
+        0);
+    String rootSite =
+        SharePointResponseHelper.getSiteCollectionResponse()
+            .replaceAll("/sites/SiteCollection", "");
+    setupSite(rootSite);
+    String rootWeb =
+        SharePointResponseHelper.getWebResponse().replaceAll("/sites/SiteCollection", "");
+    setupWeb(rootWeb);
+    String listResponse =
+        SharePointResponseHelper.getListResponse()
+            .replaceAll("/sites/SiteCollection", "")
+            .replace(
+                "ScopeID=\"{f9cb02b3-7f29-4cac-804f-ba6e14f1eb39}\"",
+                "ScopeID=\"{2e29615c-59e7-493b-b08a-3642949cc069}\"");
+    setupList(listResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}");
+    SharePointObject payloadItem =
+        new SharePointObject.Builder(SharePointObject.ATTACHMENT)
+            .setListId("{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}")
+            .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+            .setItemId("http://localhost:1/Lists/Custom List/2_.000")
+            .setObjectId("http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf")
+            .setUrl("http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf")
+            .build();
+    setupUrlSegments(
+        "http://localhost:1/Lists/Custom List/2_.000",
+        "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}",
+        "2");
+    String listItemResponse = SharePointResponseHelper.getListItemResponse();
+    listItemResponse =
+        listItemResponse
+            .replaceAll("/Test Folder", "")
+            .replaceAll("/Test%20Folder", "")
+            .replaceAll("/sites/SiteCollection", "")
+            .replaceAll("sites/SiteCollection/", "");
+    setupListItem(listItemResponse, "{6f33949a-b3ff-4b0c-ba99-93cb518ac2c0}", "2");
+    InputStream attachmentContent = new ByteArrayInputStream("attachment".getBytes());
+    when(httpClient.issueGetRequest(
+            new URL("http://localhost:1/Lists/Custom%20List/Attachments/2/attach.pdf")))
+        .thenReturn(new FileInfo.Builder(attachmentContent).build());
+    Item entry =
+        new Item()
+            .setName("http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf")
+            .encodePayload(payloadItem.encodePayload());
+
+    Properties config = getBaseConfig();
+    config.put("includeExcludeFilter.ruleName.action", action);
+    config.put("includeExcludeFilter.ruleName.itemType", "CONTENT_ITEM");
+    config.put("includeExcludeFilter.ruleName.filterType", "REGEX");
+    config.put("includeExcludeFilter.ruleName.filterPattern", "\\.pdf$");
+
+    SharePointRepository repo = setUpDefaultRepository(config);
+    repo.init(repoContext);
+
+    ApiOperation actual = repo.getDoc(entry);
+    if (action.equals("INCLUDE")) {
+      assertEquals("http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf",
+          ((RepositoryDoc) actual).getItem().getName());
+    } else {
+      assertEquals(ApiOperations.deleteItem(
+              "http://localhost:1/Lists/Custom List/Attachments/2/attach.pdf"), actual);
+    }
+  }
+
+  @Test
   public void testGetChangesNullCheckpointNoChangesSinceInitSiteCollectionOnly()
       throws IOException {
     SharePointRepository repo = getSharePointRepository();
@@ -2489,8 +2861,12 @@ public class SharePointRepositoryTest {
   }
 
   private SharePointRepository setUpDefaultRepository() throws IOException {
+    return setUpDefaultRepository(getBaseConfig());
+  }
+
+  private SharePointRepository setUpDefaultRepository(Properties config) throws IOException {
     SharePointRepository repo = getSharePointRepository();
-    overrideConfig(getBaseConfig());
+    overrideConfig(config);
     setupVirtualServerForInit();
     return repo;
   }
