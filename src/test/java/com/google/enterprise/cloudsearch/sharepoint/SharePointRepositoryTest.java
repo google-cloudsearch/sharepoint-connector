@@ -104,6 +104,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -504,6 +505,98 @@ public class SharePointRepositoryTest {
     verify(scRoot).encodeDocId("http://localhost:1");
     verify(scRoot).encodeDocId("http://localhost:1/sites/SiteCollection");
     verifyNoMoreInteractions(scRoot);
+  }
+
+  @Test
+  public void testGetVirtualServerDocContentMultipleSC() throws IOException {
+      //SharePointRepository repo = setUpDefaultRepository();
+      SharePointRepository repo = getSharePointRepository();
+      Properties properties = getBaseConfig();
+      properties.put("sharepoint.siteCollectionsToInclude",
+         "http://localhost:1/sites/SiteCollection,"
+         + "http://localhost:1/sites/SiteCollection2, http://localhost:1");
+      overrideConfig(properties);
+      setupVirtualServerForInit();
+      repo.init(repoContext);
+      SiteConnector scRoot = Mockito.mock(SiteConnector.class);
+      when(scRoot.getSiteDataClient()).thenReturn(siteDataClient);
+      when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+              .thenReturn(scRoot);
+      VirtualServer vs =
+          SiteDataClient.jaxbParse(
+              SharePointResponseHelper.loadTestResponse("vs.xml"), VirtualServer.class, false);
+      when(siteDataClient.getContentVirtualServer()).thenReturn(vs);
+      Acl policyAcl =
+          new Acl.Builder()
+              .setReaders(Collections.singletonList(Acl.getUserPrincipal("adminUser")))
+              .build();
+      when(scRoot.getWebApplicationPolicyAcl(vs)).thenReturn(policyAcl);
+      when(scRoot.encodeDocId("http://localhost:1")).thenReturn("http://localhost:1");
+      when(scRoot.encodeDocId("http://localhost:1/sites/SiteCollection"))
+          .thenReturn("http://localhost:1/sites/SiteCollection");
+      when(scRoot.encodeDocId("http://localhost:1/sites/SiteCollection2"))
+              .thenReturn("http://localhost:1/sites/SiteCollection2");
+      Map<String, String> additionalSites = new LinkedHashMap<>();
+      additionalSites.put(
+          "http://localhost:1/sites/SiteCollection1", "{4fb7dea1-2912-4927-9eda-1ea2f0977cf1}");
+      additionalSites.put(
+          "http://localhost:1/sites/SiteCollection2", "{4fb7dea1-2912-4927-9eda-1ea2f0977cf2}");
+      setupContentDBAdditionalSites("{4fb7dea1-2912-4927-9eda-1ea2f0977cf8}", additionalSites);
+      SharePointObject rootServerPayload =
+          new SharePointObject.Builder(SharePointObject.VIRTUAL_SERVER).build();
+      Item entry =
+          new Item()
+              .setName(SharePointRepository.VIRTUAL_SERVER_ID)
+              .encodePayload(rootServerPayload.encodePayload());
+      Item rootItem =
+          new IndexingItemBuilder(SharePointRepository.VIRTUAL_SERVER_ID)
+              .setAcl(policyAcl)
+              .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM)
+              .setPayload(rootServerPayload.encodePayload())
+              .build();
+      SharePointObject siteCollectionPayload =
+          new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+              .setUrl("http://localhost:1")
+              .setObjectId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .build();
+      Map<String, PushItem> entries = new HashMap<>();
+      entries.put(
+          "http://localhost:1",
+          new PushItem().encodePayload(siteCollectionPayload.encodePayload()));
+
+      SharePointObject siteCollectionPayloadManagdPath =
+          new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+              .setUrl("http://localhost:1/sites/SiteCollection")
+              .setObjectId("{5cbcd3b1-fca9-48b2-92db-3b5de26f837d}")
+              .setSiteId("{5cbcd3b1-fca9-48b2-92db-3b5de26f837d}")
+              .setWebId("{5cbcd3b1-fca9-48b2-92db-3b5de26f837d}")
+              .build();
+      entries.put(
+          "http://localhost:1/sites/SiteCollection",
+          new PushItem().encodePayload(siteCollectionPayloadManagdPath.encodePayload()));
+
+      SharePointObject siteCollection2PayloadManagdPath2 =
+              new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+                      .setUrl("http://localhost:1/sites/SiteCollection2")
+                      .setObjectId("{4fb7dea1-2912-4927-9eda-1ea2f0977cf2}")
+                      .setSiteId("{4fb7dea1-2912-4927-9eda-1ea2f0977cf2}")
+                      .setWebId("{4fb7dea1-2912-4927-9eda-1ea2f0977cf2}")
+                      .build();
+      entries.put(
+              "http://localhost:1/sites/SiteCollection2",
+              new PushItem().encodePayload(siteCollection2PayloadManagdPath2.encodePayload()));
+      RepositoryDoc.Builder expected = new RepositoryDoc.Builder().setItem(rootItem);
+      entries.entrySet().stream().forEach(e -> expected.addChildId(e.getKey(), e.getValue()));
+      ApiOperation actual = repo.getDoc(entry);
+      assertEquals(expected.build(), actual);
+      verify(scRoot, times(2)).getSiteDataClient();
+      verify(scRoot).getWebApplicationPolicyAcl(vs);
+      verify(scRoot).encodeDocId("http://localhost:1");
+      verify(scRoot).encodeDocId("http://localhost:1/sites/SiteCollection");
+      verify(scRoot).encodeDocId("http://localhost:1/sites/SiteCollection2");
+      verifyNoMoreInteractions(scRoot);
   }
 
   @Test
@@ -2527,10 +2620,23 @@ public class SharePointRepositoryTest {
   }
 
   private void setupContentDB(String id) throws IOException {
-    ContentDatabase cd =
-        SiteDataClient.jaxbParse(
-            SharePointResponseHelper.loadTestResponse("cd.xml"), ContentDatabase.class, false);
-    when(siteDataClient.getContentContentDatabase(id, true)).thenReturn(cd);
+    setupContentDBAdditionalSites(id, Collections.emptyMap());
+  }
+
+  private void setupContentDBAdditionalSites(String contentDbId, Map<String, String> sitesToAppend)
+      throws IOException {
+      StringBuilder sb = new StringBuilder();
+      for (Map.Entry<String, String> s : sitesToAppend.entrySet()) {
+          sb.append(String.format("<Site URL=\"%s\" ID=\"%s\" />", s.getKey(), s.getValue()));
+      }
+      sb.append("</Sites>");
+      ContentDatabase cd =
+          SiteDataClient.jaxbParse(
+              SharePointResponseHelper.loadTestResponse("cd.xml").replace(
+                  "</Sites>",
+                  sb.toString()),
+                  ContentDatabase.class, false);
+      when(siteDataClient.getContentContentDatabase(contentDbId, true)).thenReturn(cd);
   }
 
   private void setupSite(String xml) throws IOException {
