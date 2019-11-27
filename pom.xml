@@ -147,7 +147,7 @@
           <archive>
             <addMavenDescriptor>true</addMavenDescriptor>
             <manifest>
-              <mainClass>com.google.enterprise.cloudsearch.sharepoint.SharePointRepositoryConnector</mainClass>
+              <mainClass>com.google.enterprise.cloudsearch.sharepoint.Main</mainClass>
               <addClasspath>true</addClasspath>
               <classpathPrefix>lib/</classpathPrefix>
             </manifest>
