@@ -44,6 +44,13 @@
         <include>${artifact.artifactId}-${artifact.version}.jar</include>
       </includes>
     </fileSet>
+    <fileSet>
+      <directory>${project.basedir}/tools/on-premises</directory>
+      <outputDirectory>/tools/on-premises</outputDirectory>
+      <excludes>
+        <exclude>webapp_policies.ps1</exclude>
+      </excludes>
+    </fileSet>
   </fileSets>
   <dependencySets>
     <dependencySet>
