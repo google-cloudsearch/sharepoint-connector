@@ -443,6 +443,70 @@ public class SharePointRepositoryTest {
   }
 
   @Test
+  public void testGetDocIdsSiteCollectionOnlyMultipleSC() throws IOException {
+      SharePointRepository repo = getSharePointRepository();
+      Properties properties = getBaseConfig();
+      properties.put("sharepoint.siteCollectionOnly", "true");
+      properties.put("sharepoint.siteCollectionsToInclude",
+          "http://localhost:1, http://localhost:1/sites/SiteCollection");
+      overrideConfig(properties);
+      SiteConnector scRoot =
+          new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
+              .setSiteDataClient(siteDataClient)
+              .setPeople(peopleSoap)
+              .setUserGroup(userGroupSoap)
+              .build();
+      when(siteConnectorFactory.getInstance("http://localhost:1", "http://localhost:1"))
+          .thenReturn(scRoot);
+      String rootSite =
+          SharePointResponseHelper.getSiteCollectionResponse()
+              .replaceAll("/sites/SiteCollection", "");
+      setupSite(rootSite);
+
+      SiteDataClient siteDataClient1 = mock(SiteDataClient.class);
+      SiteConnector scSite1 =
+          new SiteConnector.Builder(
+              "http://localhost:1/sites/SiteCollection", "http://localhost:1/sites/SiteCollection")
+              .setSiteDataClient(siteDataClient1)
+              .setPeople(peopleSoap)
+              .setUserGroup(userGroupSoap)
+              .build();
+      when(siteConnectorFactory.getInstance(
+          "http://localhost:1/sites/sitecollection", "http://localhost:1/sites/sitecollection"))
+          .thenReturn(scSite1);
+      String siteCollection1 =
+          SharePointResponseHelper.getSiteCollectionResponse();
+      Site site = SiteDataClient.jaxbParse(siteCollection1, Site.class, false);
+      when(siteDataClient1.getContentSite()).thenReturn(site);
+      repo.init(repoContext);
+      List<ApiOperation> operations = new ArrayList<ApiOperation>();
+      SharePointObject siteCollectionPayload =
+          new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+              .setUrl("http://localhost:1")
+              .setObjectId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .build();
+      SharePointObject siteCollection1Payload =
+          new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+              .setUrl("http://localhost:1/sites/SiteCollection")
+              .setObjectId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .setSiteId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .setWebId("{bb3bb2dd-6ea7-471b-a361-6fb67988755c}")
+              .build();
+      PushItems rootEntry =
+          new PushItems.Builder()
+              .addPushItem("http://localhost:1/sites/SiteCollection",
+                  new PushItem().encodePayload(siteCollection1Payload.encodePayload()))
+                  .addPushItem("http://localhost:1",
+                      new PushItem().encodePayload(siteCollectionPayload.encodePayload()))
+               .build();
+      operations.add(rootEntry);
+      Iterator<ApiOperation> actual = repo.getIds(NULL_CHECKPOINT).iterator();
+      compareIterartor(operations.iterator(), actual);
+    }
+
+  @Test
   public void testGetVirtualServerDocContent() throws IOException {
     SharePointRepository repo = setUpDefaultRepository();
     repo.init(repoContext);
