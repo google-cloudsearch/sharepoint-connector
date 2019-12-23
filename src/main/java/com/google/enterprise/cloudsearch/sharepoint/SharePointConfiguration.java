@@ -30,7 +30,6 @@ import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
 import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
 import java.net.URISyntaxException;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -47,7 +46,7 @@ class SharePointConfiguration {
   private final SharePointUrl sharePointUrl;
   private final String virtualServerUrl;
   private final boolean siteCollectionOnly;
-  private final Set<String> siteCollectionsToInclude;
+  private final ImmutableSet<String> siteCollectionsToInclude;
   private final String userName;
   private final String password;
   private final String sharePointUserAgent;
@@ -88,8 +87,7 @@ class SharePointConfiguration {
       this.siteCollectionOnly = builder.sharePointUrl.getUrl().split("/").length > 3;
     }
 
-    this.siteCollectionsToInclude =
-        Collections.unmodifiableSet(new HashSet<>(builder.siteCollectionsToInclude));
+    this.siteCollectionsToInclude = ImmutableSet.copyOf(builder.siteCollectionsToInclude);
     this.virtualServerUrl = sharePointUrl.getRootUrl();
     checkState(
         !Strings.isNullOrEmpty(builder.userName) || isCredentialOptional(),
@@ -174,7 +172,7 @@ class SharePointConfiguration {
     return this.sharePointUrl;
   }
 
-  Set<String> getSiteCollectionsToInclude() {
+  ImmutableSet<String> getSiteCollectionsToInclude() {
       return this.siteCollectionsToInclude;
   }
 
@@ -346,7 +344,6 @@ class SharePointConfiguration {
   static SharePointConfiguration fromConfiguration() {
     checkState(Configuration.isInitialized(), "connector configuration not initialized yet");
     String sharePointServer = Configuration.getString("sharepoint.server", null).get();
-    final Set<String> siteCollectionsToInclude;
     boolean performBrowserLeniency =
         Configuration.getBoolean("connector.lenientUrlRulesAndCustomRedirect", true).get();
     SharePointUrl sharepointUrl;
@@ -362,7 +359,7 @@ class SharePointConfiguration {
     String password = Configuration.getString("sharepoint.password", DEFAULT_PASSWORD).get();
     String siteCollectionOnlyMode =
         Configuration.getString("sharepoint.siteCollectionOnly", "").get();
-    String siteCollectionsToIncludeMode =
+    String siteCollectionsToIncludeConfig =
         Configuration.getString("sharepoint.siteCollectionsToInclude", "").get();
     String sharePointUserAgent = Configuration.getString("sharepoint.userAgent", "").get().trim();
     int socketTimeoutMillis =
@@ -381,21 +378,15 @@ class SharePointConfiguration {
 
     Iterable<String> siteCollections = Splitter.on(',')
         .trimResults().omitEmptyStrings()
-        .split(siteCollectionsToIncludeMode.toLowerCase(Locale.ENGLISH));
-    Set<String> processed = new HashSet<String>();
+        .split(siteCollectionsToIncludeConfig.toLowerCase(Locale.ENGLISH));
+    ImmutableSet.Builder<String> processed = new ImmutableSet.Builder<String>();
     for (String url : siteCollections) {
-        processed.add(getCanonicalUrl(url.trim()));
+        processed.add(getCanonicalUrl(url));
     }
-    siteCollectionsToInclude = ImmutableSet.copyOf(processed);
+    ImmutableSet<String> siteCollectionsToInclude = processed.build();
     if (!siteCollectionsToInclude.isEmpty()) {
         log.log(Level.CONFIG,
-            "List of site collections to index: {0}", siteCollectionsToInclude);
-    }
-    if (!siteCollectionsToInclude.isEmpty()
-        && sharePointServer.split("/").length > 3) {
-        throw new InvalidConfigurationException("sharepoint.server value "
-            + "should point to virtual server when "
-            + "sharepoint.siteCollectionsToInclude property is specified.");
+                "List of site collections to index: {0}", siteCollectionsToInclude);
     }
     try {
       return new Builder(sharepointUrl)

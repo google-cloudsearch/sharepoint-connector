@@ -958,19 +958,19 @@ class SharePointRepository implements Repository {
             if (!sharepointConfiguration.isSiteCollectionIncluded(site.value)) {
                 return null;
             }
-        } else {
-           if (!sharepointConfiguration.getSharePointUrl().getUrl().equals(site.value)) {
-               log.log(
-                       Level.FINE,
-                       "Returning null SiteConnector for {0} because "
-                           + "connector is currently configured in site collection mode "
-                           + "for {1} only.",
-                       new Object[] {url, sharepointConfiguration.getSharePointUrl()});
-               return null;
-           }
+        } else if (!sharepointConfiguration.getSharePointUrl().getUrl().equals(site.value)) {
+            // Performing case sensitive comparison as mismatch in URL casing
+            // between SharePoint Server and connector can result in broken ACL
+            // inheritance chain on GSA.
+            log.log(
+                Level.FINE,
+                "Returning null SiteConnector for {0} because "
+                    + "connector is currently configured in site collection mode "
+                    + "for {1} only.",
+                new Object[] {url, sharepointConfiguration.getSharePointUrl()});
+            return null;
         }
-    }
-    if (!sharepointConfiguration.isSiteCollectionIncluded(site.value)) {
+    } else if (!sharepointConfiguration.isSiteCollectionIncluded(site.value)) {
         return null;
     }
     return getSiteConnector(site.value, web.value);
@@ -1063,8 +1063,8 @@ class SharePointRepository implements Repository {
           }
         }
         if (excluded.size() > 0) {
-            log.log(Level.INFO, "List of site collections excluded from index in "
-                + "getDocIds: {0}", excluded);
+            log.log(Level.INFO, "List of site collections excluded from index in getDocIds: {0}",
+                excluded);
         }
       }
       return operations;
@@ -1094,8 +1094,6 @@ class SharePointRepository implements Repository {
       PushItems.Builder builder = new PushItems.Builder();
       for (String s : sites) {
           SiteConnector scConnector = getSiteConnector(s, s);
-          assert scConnector != null;
-          assert scConnector.getSiteDataClient() != null;
           Site site = scConnector.getSiteDataClient().getContentSite();
           String siteCollectionUrl = getCanonicalUrl(site.getMetadata().getURL());
           SharePointObject siteCollection =

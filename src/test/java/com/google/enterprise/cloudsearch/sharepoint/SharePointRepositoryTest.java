@@ -496,10 +496,10 @@ public class SharePointRepositoryTest {
               .build();
       PushItems rootEntry =
           new PushItems.Builder()
-              .addPushItem("http://localhost:1/sites/SiteCollection",
-                  new PushItem().encodePayload(siteCollection1Payload.encodePayload()))
                   .addPushItem("http://localhost:1",
                       new PushItem().encodePayload(siteCollectionPayload.encodePayload()))
+                  .addPushItem("http://localhost:1/sites/SiteCollection",
+                      new PushItem().encodePayload(siteCollection1Payload.encodePayload()))
                .build();
       operations.add(rootEntry);
       Iterator<ApiOperation> actual = repo.getIds(NULL_CHECKPOINT).iterator();
