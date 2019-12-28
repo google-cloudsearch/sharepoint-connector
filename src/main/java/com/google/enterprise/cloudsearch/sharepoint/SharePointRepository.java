@@ -49,6 +49,7 @@ import com.google.enterprise.cloudsearch.sdk.indexing.Acl;
 import com.google.enterprise.cloudsearch.sdk.indexing.Acl.InheritanceType;
 import com.google.enterprise.cloudsearch.sdk.indexing.ContentTemplate;
 import com.google.enterprise.cloudsearch.sdk.indexing.DefaultAcl.DefaultAclMode;
+import com.google.enterprise.cloudsearch.sdk.indexing.IncludeExcludeFilter;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.FieldOrValue;
 import com.google.enterprise.cloudsearch.sdk.indexing.IndexingItemBuilder.ItemType;
@@ -304,6 +305,7 @@ class SharePointRepository implements Repository {
   private SharePointIncrementalCheckpoint initIncrementalCheckpoint;
   private ContentTemplate listItemContentTemplate;
   private HtmlContentFilter htmlContentFilter;
+  private IncludeExcludeFilter includeExcludeFilter;
 
   SharePointRepository() {
     this(
@@ -387,6 +389,7 @@ class SharePointRepository implements Repository {
     initIncrementalCheckpoint = computeIncrementalCheckpoint();
     listItemContentTemplate = ContentTemplate.fromConfiguration("sharepointItem");
     htmlContentFilter = HtmlContentFilter.fromConfiguration();
+    includeExcludeFilter = IncludeExcludeFilter.fromConfiguration();
     if (repositoryContext.getDefaultAclMode() == DefaultAclMode.FALLBACK) {
       log.log(Level.WARNING, "The default ACL in FALLBACK mode will be ignored.");
     }
@@ -838,19 +841,45 @@ class SharePointRepository implements Repository {
       }
 
       if (SharePointObject.SITE_COLLECTION.equals(objectType)) {
-        return getSiteCollectionDocContent(item, siteConnector, payloadObject);
+        if (includeExcludeFilter.isAllowed(itemUrl, ItemType.CONTAINER_ITEM)) {
+          return getSiteCollectionDocContent(item, siteConnector, payloadObject);
+        } else {
+          return ApiOperations.deleteItem(item.getName());
+        }
       }
       if (SharePointObject.WEB.equals(objectType)) {
-        return getWebDocContent(item, siteConnector, payloadObject);
+        if (includeExcludeFilter.isAllowed(itemUrl, ItemType.CONTAINER_ITEM)) {
+          return getWebDocContent(item, siteConnector, payloadObject);
+        } else {
+          return ApiOperations.deleteItem(item.getName());
+        }
       }
       if (SharePointObject.LIST.equals(objectType)) {
-        return getListDocContent(item, siteConnector, payloadObject);
+        if (includeExcludeFilter.isAllowed(itemUrl, ItemType.CONTAINER_ITEM)) {
+          return getListDocContent(item, siteConnector, payloadObject);
+        } else {
+          return ApiOperations.deleteItem(item.getName());
+        }
       }
       if (SharePointObject.LIST_ITEM.equals(objectType)) {
-        return getListItemDocContent(item, siteConnector, payloadObject);
+        ApiOperation operation = getListItemDocContent(item, siteConnector, payloadObject);
+        if (operation instanceof RepositoryDoc) {
+          ItemType itemType =
+              ItemType.valueOf(((RepositoryDoc) operation).getItem().getItemType());
+          if (includeExcludeFilter.isAllowed(itemUrl, itemType)) {
+            return operation;
+          } else {
+            return ApiOperations.deleteItem(item.getName());
+          }
+        }
+        return operation;
       }
       if (SharePointObject.ATTACHMENT.equals(objectType)) {
-        return getAttachmentDocContent(item, siteConnector, payloadObject);
+        if (includeExcludeFilter.isAllowed(itemUrl, ItemType.CONTENT_ITEM)) {
+          return getAttachmentDocContent(item, siteConnector, payloadObject);
+        } else {
+          return ApiOperations.deleteItem(item.getName());
+        }
       }
       PushItem notModified =
           new PushItem()
