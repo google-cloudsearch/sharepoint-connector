@@ -117,6 +117,8 @@ import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
 import java.util.logging.StreamHandler;
 import javax.xml.ws.Holder;
+import junitparams.JUnitParamsRunner;
+import junitparams.Parameters;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -125,13 +127,16 @@ import org.junit.runner.RunWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.Mockito;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
+import org.mockito.quality.Strictness;
 
 /** Unit tests for {@link SharePointRepository} */
-@RunWith(MockitoJUnitRunner.class)
+@RunWith(JUnitParamsRunner.class)
 public class SharePointRepositoryTest {
   private static final byte[] NULL_CHECKPOINT = null;
   private static final String XMLNS = "http://schemas.microsoft.com/sharepoint/soap/";
+  @Rule public MockitoRule rule = MockitoJUnit.rule().strictness(Strictness.LENIENT);
   @Rule public ExpectedException thrown = ExpectedException.none();
   @Rule public ResetConfigRule resetConfig = new ResetConfigRule();
   @Rule public SetupConfigRule setupConfig = SetupConfigRule.uninitialized();
@@ -1818,16 +1823,8 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void getDoc_includeExcludeFilter_siteCollection_include() throws IOException {
-    getDoc_includeExcludeFilter_siteCollection("INCLUDE");
-  }
-
-  @Test
-  public void getDoc_includeExcludeFilter_siteCollection_exclude() throws IOException {
-    getDoc_includeExcludeFilter_siteCollection("EXCLUDE");
-  }
-
-  private void getDoc_includeExcludeFilter_siteCollection(String action) throws IOException {
+  @Parameters({"INCLUDE", "EXCLUDE"})
+  public void getDoc_includeExcludeFilter_siteCollection(String action) throws IOException {
     SiteConnector scRoot =
         new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
             .setSiteDataClient(siteDataClient)
@@ -1877,16 +1874,8 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void getDoc_includeExcludeFilter_web_include() throws IOException {
-    getDoc_includeExcludeFilter_web("INCLUDE");
-  }
-
-  @Test
-  public void getDoc_includeExcludeFilter_web_exclude() throws IOException {
-    getDoc_includeExcludeFilter_web("EXCLUDE");
-  }
-
-  private void getDoc_includeExcludeFilter_web(String action) throws IOException {
+  @Parameters({"INCLUDE", "EXCLUDE"})
+  public void getDoc_includeExcludeFilter_web(String action) throws IOException {
     SiteConnector scRoot =
         new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
             .setSiteDataClient(siteDataClient)
@@ -1947,16 +1936,8 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void getDoc_includeExcludeFilter_listItem_include() throws Exception {
-    getDoc_includeExcludeFilter_listItem("INCLUDE");
-  }
-
-  @Test
-  public void getDoc_includeExcludeFilter_listItem_exclude() throws Exception {
-    getDoc_includeExcludeFilter_listItem("EXCLUDE");
-  }
-
-  private void getDoc_includeExcludeFilter_listItem(String action) throws Exception {
+  @Parameters({"INCLUDE", "EXCLUDE"})
+  public void getDoc_includeExcludeFilter_listItem(String action) throws Exception {
     SiteConnector scRoot =
         new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
             .setSiteDataClient(siteDataClient)
@@ -2029,16 +2010,8 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void getDoc_includeExcludeFilter_list_include() throws Exception {
-    getDoc_includeExcludeFilter_list("INCLUDE");
-  }
-
-  @Test
-  public void getDoc_includeExcludeFilter_list_exclude() throws Exception {
-    getDoc_includeExcludeFilter_list("EXCLUDE");
-  }
-
-  private void getDoc_includeExcludeFilter_list(String action) throws Exception {
+  @Parameters({"INCLUDE", "EXCLUDE"})
+  public void getDoc_includeExcludeFilter_list(String action) throws Exception {
     SiteConnector scRoot =
         new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
             .setSiteDataClient(siteDataClient)
@@ -2101,16 +2074,8 @@ public class SharePointRepositoryTest {
   }
 
   @Test
-  public void getDoc_includeExcludeFilter_attachment_include() throws IOException {
-    getDoc_includeExcludeFilter_attachment("INCLUDE");
-  }
-
-  @Test
-  public void getDoc_includeExcludeFilter_attachment_exclude() throws IOException {
-    getDoc_includeExcludeFilter_attachment("EXCLUDE");
-  }
-
-  private void getDoc_includeExcludeFilter_attachment(String action) throws IOException {
+  @Parameters({"INCLUDE", "EXCLUDE"})
+  public void getDoc_includeExcludeFilter_attachment(String action) throws IOException {
     SiteConnector scRoot =
         new SiteConnector.Builder("http://localhost:1", "http://localhost:1")
             .setSiteDataClient(siteDataClient)
