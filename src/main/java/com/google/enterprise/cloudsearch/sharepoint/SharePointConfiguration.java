@@ -19,28 +19,34 @@ package com.google.enterprise.cloudsearch.sharepoint;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.enterprise.cloudsearch.sharepoint.SharePointUrl.Builder.getCanonicalUrl;
 
+import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.enterprise.cloudsearch.sdk.InvalidConfigurationException;
 import com.google.enterprise.cloudsearch.sdk.config.Configuration;
 import com.google.enterprise.cloudsearch.sdk.identity.IdentitySourceConfiguration;
 import java.net.URISyntaxException;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 class SharePointConfiguration {
+  private static final Logger log = Logger.getLogger(SharePointRepository.class.getName());
   private static final String DEFAULT_USER_NAME = isCredentialOptional() ? "" : null;
   private static final String DEFAULT_PASSWORD = isCredentialOptional() ? "" : null;
 
   private final SharePointUrl sharePointUrl;
   private final String virtualServerUrl;
   private final boolean siteCollectionOnly;
-  private final Set<String> siteCollectionsToInclude;
+  private final ImmutableSet<String> siteCollectionsToInclude;
   private final String userName;
   private final String password;
   private final String sharePointUserAgent;
@@ -63,6 +69,13 @@ class SharePointConfiguration {
 
   private final SharePointDeploymentType sharePointDeploymentType;
 
+  public boolean isSiteCollectionIncluded(String siteCollectionUrl) {
+    Preconditions.checkNotNull(siteCollectionUrl, "Site Collection URL may not be null");
+    String url = getCanonicalUrl(siteCollectionUrl);
+    return siteCollectionsToInclude.isEmpty()
+        || siteCollectionsToInclude.contains(url.toLowerCase(Locale.ENGLISH));
+  }
+
   private SharePointConfiguration(Builder builder) throws URISyntaxException {
     sharePointUrl = builder.sharePointUrl;
     if (!"".equals(builder.sharePointSiteCollectionOnly)) {
@@ -74,8 +87,7 @@ class SharePointConfiguration {
       this.siteCollectionOnly = builder.sharePointUrl.getUrl().split("/").length > 3;
     }
 
-    this.siteCollectionsToInclude =
-        Collections.unmodifiableSet(new HashSet<>(builder.siteCollectionsToInclude));
+    this.siteCollectionsToInclude = ImmutableSet.copyOf(builder.siteCollectionsToInclude);
     this.virtualServerUrl = sharePointUrl.getRootUrl();
     checkState(
         !Strings.isNullOrEmpty(builder.userName) || isCredentialOptional(),
@@ -158,6 +170,10 @@ class SharePointConfiguration {
 
   SharePointUrl getSharePointUrl() {
     return this.sharePointUrl;
+  }
+
+  ImmutableSet<String> getSiteCollectionsToInclude() {
+      return this.siteCollectionsToInclude;
   }
 
   String getUserName() {
@@ -343,6 +359,8 @@ class SharePointConfiguration {
     String password = Configuration.getString("sharepoint.password", DEFAULT_PASSWORD).get();
     String siteCollectionOnlyMode =
         Configuration.getString("sharepoint.siteCollectionOnly", "").get();
+    String siteCollectionsToIncludeConfig =
+        Configuration.getString("sharepoint.siteCollectionsToInclude", "").get();
     String sharePointUserAgent = Configuration.getString("sharepoint.userAgent", "").get().trim();
     int socketTimeoutMillis =
         Configuration.getInteger("sharepoint.webservices.socketTimeoutSecs", 30).get() * 1000;
@@ -357,11 +375,25 @@ class SharePointConfiguration {
                 SharePointDeploymentType.ON_PREMISES,
                 (v) -> SharePointDeploymentType.valueOf(v.toUpperCase(Locale.ENGLISH)))
             .get();
+
+    Iterable<String> siteCollections = Splitter.on(',')
+        .trimResults().omitEmptyStrings()
+        .split(siteCollectionsToIncludeConfig.toLowerCase(Locale.ENGLISH));
+    ImmutableSet.Builder<String> processed = new ImmutableSet.Builder<String>();
+    for (String url : siteCollections) {
+        processed.add(getCanonicalUrl(url));
+    }
+    ImmutableSet<String> siteCollectionsToInclude = processed.build();
+    if (!siteCollectionsToInclude.isEmpty()) {
+        log.log(Level.CONFIG,
+                "List of site collections to index: {0}", siteCollectionsToInclude);
+    }
     try {
       return new Builder(sharepointUrl)
           .setUserName(username)
           .setPassword(password)
           .setSharePointSiteCollectionOnly(siteCollectionOnlyMode)
+          .setSiteCollectionsToInclude(siteCollectionsToInclude)
           .setUserAgent(sharePointUserAgent)
           .setWebservicesSocketTimeoutMills(socketTimeoutMillis)
           .setWebservicesReadTimeoutMills(readTimeOutMillis)

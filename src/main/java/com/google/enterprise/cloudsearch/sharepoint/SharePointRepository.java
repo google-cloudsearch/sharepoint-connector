@@ -33,6 +33,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
@@ -104,6 +105,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.TreeSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -980,19 +982,25 @@ class SharePointRepository implements Repository {
     if (result != 0) {
       return null;
     }
-    if (sharepointConfiguration.isSiteCollectionUrl()
-        &&
-        // Performing case sensitive comparison as mismatch in URL casing
-        // between SharePoint Server and connector can result in broken ACL
-        // inheritance chain on GSA.
-        !sharepointConfiguration.getSharePointUrl().getUrl().equals(site.value)) {
-      log.log(
-          Level.FINE,
-          "Returning null SiteConnector for {0} because "
-              + "connector is currently configured in site collection mode "
-              + "for {1} only.",
-          new Object[] {url, sharepointConfiguration.getSharePointUrl()});
-      return null;
+    if (sharepointConfiguration.isSiteCollectionUrl()) {
+        if (!sharepointConfiguration.getSiteCollectionsToInclude().isEmpty()) {
+            if (!sharepointConfiguration.isSiteCollectionIncluded(site.value)) {
+                return null;
+            }
+        } else if (!sharepointConfiguration.getSharePointUrl().getUrl().equals(site.value)) {
+            // Performing case sensitive comparison as mismatch in URL casing
+            // between SharePoint Server and connector can result in broken ACL
+            // inheritance chain on GSA.
+            log.log(
+                Level.FINE,
+                "Returning null SiteConnector for {0} because "
+                    + "connector is currently configured in site collection mode "
+                    + "for {1} only.",
+                new Object[] {url, sharepointConfiguration.getSharePointUrl()});
+            return null;
+        }
+    } else if (!sharepointConfiguration.isSiteCollectionIncluded(site.value)) {
+        return null;
     }
     return getSiteConnector(site.value, web.value);
   }
@@ -1066,18 +1074,26 @@ class SharePointRepository implements Repository {
         if (cd.getSites() == null) {
           continue;
         }
+        Set<String> excluded = new TreeSet<>();
         for (Sites.Site siteListing : cd.getSites().getSite()) {
           String siteString = vsConnector.encodeDocId(siteListing.getURL());
           siteString = getCanonicalUrl(siteString);
+          if (!sharepointConfiguration.isSiteCollectionIncluded(siteString)) {
+              excluded.add(siteString);
+              continue;
+          }
           SharePointUrl sharePointSiteUrl;
           try {
-            sharePointSiteUrl =
-                buildSharePointUrl(siteString);
+            sharePointSiteUrl = buildSharePointUrl(siteString);
             ntlmAuthenticator.addPermitForHost(sharePointSiteUrl.toURL());
           } catch (URISyntaxException e) {
             log.log(Level.WARNING, "Error parsing site url", e);
             continue;
           }
+        }
+        if (excluded.size() > 0) {
+            log.log(Level.INFO, "List of site collections excluded from index in getDocIds: {0}",
+                excluded);
         }
       }
       return operations;
@@ -1101,18 +1117,26 @@ class SharePointRepository implements Repository {
   }
 
   private PushItems getPushItemsForSiteCollectionOnly() throws IOException {
-    SiteConnector scConnector = getSiteConnectorForSiteCollectionOnly();
-    Site site = scConnector.getSiteDataClient().getContentSite();
-    String siteCollectionUrl = getCanonicalUrl(site.getMetadata().getURL());
-    SharePointObject siteCollection =
-        new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
-            .setUrl(siteCollectionUrl)
-            .setObjectId(site.getMetadata().getID())
-            .setSiteId(site.getMetadata().getID())
-            .setWebId(site.getMetadata().getID())
-            .build();
-    PushItem pushEntry = new PushItem().encodePayload(siteCollection.encodePayload());
-    return new PushItems.Builder().addPushItem(siteCollectionUrl, pushEntry).build();
+      Set<String> sites = sharepointConfiguration.getSiteCollectionsToInclude().isEmpty()
+              ? ImmutableSet.of(sharepointConfiguration.getSharePointUrl().getUrl())
+              : ImmutableSet.copyOf(sharepointConfiguration.getSiteCollectionsToInclude());
+      PushItems.Builder builder = new PushItems.Builder();
+      for (String s : sites) {
+          SiteConnector scConnector = getSiteConnector(s, s);
+          Site site = scConnector.getSiteDataClient().getContentSite();
+          String siteCollectionUrl = getCanonicalUrl(site.getMetadata().getURL());
+          SharePointObject siteCollection =
+                  new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
+                          .setUrl(siteCollectionUrl)
+                          .setObjectId(site.getMetadata().getID())
+                          .setSiteId(site.getMetadata().getID())
+                          .setWebId(site.getMetadata().getID())
+                          .build();
+          PushItem pushEntry = new PushItem().encodePayload(siteCollection.encodePayload());
+          log.log(Level.FINE, "Pushing site collection URL {0}", siteCollectionUrl);
+          builder.addPushItem(siteCollectionUrl, pushEntry);
+      }
+    return builder.build();
   }
 
   private SiteConnector getSiteConnectorForSiteCollectionOnly() throws IOException {
@@ -1135,6 +1159,7 @@ class SharePointRepository implements Repository {
               .setItemType(ItemType.VIRTUAL_CONTAINER_ITEM)
               .setPayload(item.decodePayload());
       RepositoryDoc.Builder docBuilder = new RepositoryDoc.Builder().setItem(itemBuilder.build());
+      Set<String> excluded = new TreeSet<String>();
       for (ContentDatabases.ContentDatabase cdcd : vs.getContentDatabases().getContentDatabase()) {
         try {
           ContentDatabase cd =
@@ -1143,6 +1168,10 @@ class SharePointRepository implements Repository {
             for (Sites.Site site : cd.getSites().getSite()) {
               String siteUrl = site.getURL();
               siteUrl = getCanonicalUrl(siteUrl);
+              if (!sharepointConfiguration.isSiteCollectionIncluded(siteUrl)) {
+                  excluded.add(siteUrl);
+                  continue;
+              }
               SharePointObject siteCollection =
                   new SharePointObject.Builder(SharePointObject.SITE_COLLECTION)
                       .setUrl(siteUrl)
@@ -1159,6 +1188,11 @@ class SharePointRepository implements Repository {
           log.log(
               Level.WARNING, "Error retrieving sites from content database " + cdcd.getID(), ex);
         }
+      }
+      if (excluded.size() > 0) {
+          log.log(Level.INFO,
+              "List of site collections excluded from index in "
+              + "getVirtualServerDocContent: {0}", excluded);
       }
       return docBuilder.build();
     } catch (IOException e) {
